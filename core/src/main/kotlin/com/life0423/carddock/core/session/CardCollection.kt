@@ -87,7 +87,7 @@ internal class CardCollection(
     private suspend fun persist(cards: List<CardRecord>): Boolean {
         return try {
             currentCoroutineContext().ensureActive()
-            // Commit disk and memory together even if an action is cancelled during the write.
+            // 取消不能把磁盘提交和内存发布拆开。
             withContext(NonCancellable) {
                 store.save(cards)
                 mutableState.value = CardCollectionState(loading = false, cards = cards)
@@ -96,9 +96,30 @@ internal class CardCollection(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            notify("保存失败，本次更改未提交。请检查设备空间后重试。")
-            false
+            // save 抛错时正式文件可能已经换成新内容。先重载，让内存跟上磁盘，避免下一次写入用旧集合盖掉新卡。
+            reconcileAfterFailedSave(cards)
         }
+    }
+
+    /** 返回 true 表示磁盘上已经是本次要保存的集合。无法读取时暂停后续写入。 */
+    private suspend fun reconcileAfterFailedSave(attempted: List<CardRecord>): Boolean {
+        val onDisk = try {
+            store.load()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            readable = false
+            notify("保存结果无法确认，已暂停写入，避免覆盖磁盘上的卡片。")
+            return false
+        }
+        if (onDisk == null) {
+            notify("保存失败，本次更改未提交。请检查设备空间后重试。")
+            return false
+        }
+        mutableState.value = CardCollectionState(loading = false, cards = onDisk)
+        if (onDisk == attempted) return true
+        notify("保存失败，本次更改未提交。请检查设备空间后重试。")
+        return false
     }
 
     fun showStorageFailure(cardId: String, runId: String) {

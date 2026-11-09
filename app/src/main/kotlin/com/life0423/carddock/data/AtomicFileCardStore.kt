@@ -8,6 +8,7 @@ import com.life0423.carddock.core.rule.RuleValidator
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -48,21 +49,36 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
             val bytes = json.encodeToString(StoredCards(STORAGE_VERSION, cards)).toByteArray(Charsets.UTF_8)
             currentCoroutineContext().ensureActive()
             val output = file.startWrite()
-            var committed = false
             try {
                 output.write(bytes)
-                // Detect a disk sync error instead of relying on AtomicFile's internal logging.
+                // 同步失败发生在替换正式文件之前，旧内容还在。
                 output.fd.sync()
                 currentCoroutineContext().ensureActive()
                 file.finishWrite(output)
-                // AtomicFile logs some rename failures; verify that the committed file is ours.
-                val committedBytes = file.openRead().use { it.readBytes() }
-                if (!committedBytes.contentEquals(bytes)) throw IOException("Atomic card replacement did not complete")
-                committed = true
-            } finally {
-                // This is synchronous cleanup, so it also runs when the coroutine is cancelled.
-                if (!committed) file.failWrite(output)
+            } catch (cancelled: CancellationException) {
+                file.failWrite(output)
+                throw cancelled
+            } catch (error: Exception) {
+                file.failWrite(output)
+                throw error
             }
+            // finishWrite 的 rename 失败只记日志，openRead 也可能在文件已经换上之后失败。
+            // 以正式文件的字节为准：已经是本次内容就视为成功，避免磁盘新而调用方仍保留旧内存。
+            if (!baseFileHas(bytes)) {
+                file.failWrite(output)
+                throw IOException("Atomic card replacement did not complete")
+            }
+        }
+    }
+
+    /** 只认正式文件。目录、读失败或字节不符都表示这次替换没有完成。 */
+    private fun baseFileHas(bytes: ByteArray): Boolean {
+        val base = file.baseFile
+        if (!base.isFile) return false
+        return try {
+            base.readBytes().contentEquals(bytes)
+        } catch (_: IOException) {
+            false
         }
     }
 
