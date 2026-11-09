@@ -26,9 +26,12 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 
+// 标题画在 primaryContainer 上。亮色若用 primary（#00506E / #23759B）只有约 1.72:1，
+// 所以配对 onPrimaryContainer：亮色白，暗色 #F4F9FF。
 private val DarkColorScheme = darkColorScheme(
     primary = primaryDark,
     primaryContainer = primaryContainerDark,
+    onPrimaryContainer = onPrimaryContainerDark,
     secondary = secondaryDark,
     tertiary = tertiaryDark
 )
@@ -36,12 +39,13 @@ private val DarkColorScheme = darkColorScheme(
 private val LightColorScheme = lightColorScheme(
     primary = primaryLight,
     primaryContainer = primaryContainerLight,
+    onPrimaryContainer = onPrimaryContainerLight,
     secondary = secondaryLight,
     tertiary = tertiaryLight
 )
 
 /**
- * 应用级 Material 3 主题。配色仍是模板生成值，品牌色以后再换。
+ * 应用级 Material 3 主题。色值在 Color.kt 里手维护，品牌色以后再换。
  *
  * @param darkTheme 为 true 时用深色方案，默认跟随系统。
  * @param dynamicColor 仅当它为 true 且 API ≥ 31 时才用壁纸动态色。默认是 false，首版用 Color.kt 里的固定色板。

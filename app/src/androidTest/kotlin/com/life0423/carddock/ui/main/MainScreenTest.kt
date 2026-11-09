@@ -3,25 +3,31 @@ package com.life0423.carddock.ui.main
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import com.life0423.carddock.ui.theme.CardDockTheme
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 
-/** UI tests for [com.life0423.carddock.ui.main.MainScreen]. */
+/**
+ * 仪器测试主屏静态占位。
+ *
+ * 直接组合真实的 [MainScreen]，确认标题是产品名。
+ * 骨架已去掉导航、仓库和加载态，这里不覆盖那些路径。
+ */
 class MainScreenTest {
-
   @get:Rule val composeTestRule = createAndroidComposeRule<ComponentActivity>()
 
+  /** 用和启动页相同的主题挂上主屏，不绕开界面去喂假数据。 */
   @Before
   fun setup() {
-    composeTestRule.setContent { MainScreen(FAKE_DATA) }
+    composeTestRule.setContent {
+      CardDockTheme { MainScreen() }
+    }
   }
 
+  /** 标题应显示 strings.xml 里的产品名。改名时这里要一起改。 */
   @Test
-  fun firstItem_exists() {
-    // Greeting 的文案是 "Hello $name !"（感叹号前有空格），断言必须和界面对上。
-    FAKE_DATA.forEach { composeTestRule.onNodeWithText("Hello $it !").assertExists() }
+  fun appName_exists() {
+    composeTestRule.onNodeWithText("卡坞").assertExists()
   }
 }
-
-private val FAKE_DATA = listOf("Sample1", "Sample2", "Sample3")

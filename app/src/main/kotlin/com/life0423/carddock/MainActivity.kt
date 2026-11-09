@@ -8,12 +8,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import com.life0423.carddock.ui.main.MainScreen
 import com.life0423.carddock.ui.theme.CardDockTheme
 
 /**
  * 应用启动入口。
  *
- * 只负责开窗口并把 [MainNavigation] 放进主题。卡片台面和无障碍采集不在这里实现。
+ * 只负责开窗口并把 [MainScreen] 放进主题。卡片台面和无障碍采集不在这里实现。
  */
 class MainActivity : ComponentActivity() {
   /**
@@ -26,7 +27,14 @@ class MainActivity : ComponentActivity() {
 
     enableEdgeToEdge()
     setContent {
-      CardDockTheme { Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { MainNavigation() } }
+      CardDockTheme {
+        Surface(
+          modifier = Modifier.fillMaxSize(),
+          color = MaterialTheme.colorScheme.background,
+        ) {
+          MainScreen()
+        }
+      }
     }
   }
 }
