@@ -2,39 +2,25 @@ package com.life0423.carddock
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.ui.Modifier
-import com.life0423.carddock.ui.main.MainScreen
-import com.life0423.carddock.ui.theme.CardDockTheme
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.life0423.carddock.ui.CardDockApp
 
-/**
- * 应用启动入口。
- *
- * 只负责开窗口并把 [MainScreen] 放进主题。卡片台面和无障碍采集不在这里实现。
- */
 class MainActivity : ComponentActivity() {
-  /**
-   * 创建窗口并挂上 Compose。
-   *
-   * @param savedInstanceState 系统在配置变更后交回的状态。首版没有自己的状态要恢复。
-   */
-  override fun onCreate(savedInstanceState: Bundle?) {
-    super.onCreate(savedInstanceState)
-
-    enableEdgeToEdge()
-    setContent {
-      CardDockTheme {
-        Surface(
-          modifier = Modifier.fillMaxSize(),
-          color = MaterialTheme.colorScheme.background,
-        ) {
-          MainScreen()
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
+        val controller = (application as CardDockApplication).container.controller
+        setContent {
+            val viewModel: CardDockViewModel = viewModel(factory = CardDockViewModel.factory(controller))
+            val state = viewModel.state.collectAsStateWithLifecycle()
+            CardDockApp(state = state.value, actions = viewModel.actions)
         }
-      }
     }
-  }
 }

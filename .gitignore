@@ -1,35 +1,13 @@
-# Gradle
 .gradle/
-build/
 .kotlin/
-
-# Local configuration (SDK path)
+**/build/
 local.properties
-
-# Log / OS
-*.log
-.DS_Store
-
-# Android Studio / IntelliJ
-*.iml
-.idea/
-captures/
-.externalNativeBuild/
-.cxx/
-*.apk
-*.ap_
-*.aab
-output-metadata.json
-
-# Keystore
 *.jks
 *.keystore
-# 本地签名参数。上面忽略的是密钥文件本身；这两个文件里常有路径和密码。
 keystore.properties
-signing.properties
-
-# Firebase 客户端配置。以后若接入，由本地或 CI 注入。
-google-services.json
-
-# Profiling
-*.hprof
+.env
+.env.*
+!.env.example
+.idea/
+*.iml
+test-data/private/

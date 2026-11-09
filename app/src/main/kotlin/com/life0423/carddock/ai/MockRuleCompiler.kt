@@ -1,0 +1,49 @@
+package com.life0423.carddock.ai
+
+import com.life0423.carddock.core.model.TemplateDefinition
+import com.life0423.carddock.core.model.TemplateKind
+import com.life0423.carddock.core.port.CompileResult
+import com.life0423.carddock.core.port.RuleCompiler
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+
+/** Keyword routing for the prototype, not an AI model or an arbitrary rule generator. */
+class MockRuleCompiler(templates: List<TemplateDefinition>) : RuleCompiler {
+    private val availableTemplates = templates.toList()
+
+    override suspend fun compile(prompt: String): CompileResult {
+        currentCoroutineContext().ensureActive()
+        val request = prompt.trim().lowercase()
+        if (request.isEmpty()) return CompileResult.Unsupported("请先描述想查看的信息，例如“查看快递取件码”。")
+        if (unsupportedActions.any(request::contains)) {
+            return CompileResult.Unsupported("当前原型只演示信息读取，暂不支持下单、支付或修改数据。")
+        }
+
+        val matchingKinds = keywords.filterValues { words -> words.any { matches(request, it) } }.keys
+        if (matchingKinds.size > 1) {
+            return CompileResult.Unsupported("这段描述包含多个功能，请先选择快递、外卖或出行中的一个。")
+        }
+        if (matchingKinds.isEmpty()) {
+            return CompileResult.Unsupported("暂未匹配到模板。当前支持快递取件、外卖进度和出行安排。")
+        }
+        val template = availableTemplates.singleOrNull { it.kind == matchingKinds.single() }
+            ?: return CompileResult.Unsupported("这个演示模板暂不可用，请选择其他模板。")
+        return CompileResult.Success(template)
+    }
+
+    private fun matches(request: String, keyword: String): Boolean =
+        if (keyword.first() in 'a'..'z') {
+            Regex("\\b${Regex.escape(keyword)}\\b").containsMatchIn(request)
+        } else {
+            keyword in request
+        }
+
+    private companion object {
+        val keywords = mapOf(
+            TemplateKind.EXPRESS to listOf("快递", "取件", "包裹", "parcel", "pickup"),
+            TemplateKind.DELIVERY to listOf("外卖", "送餐", "delivery", "takeaway"),
+            TemplateKind.TRAVEL to listOf("出行", "行程", "车票", "高铁", "火车", "检票", "travel", "train"),
+        )
+        val unsupportedActions = listOf("支付", "付款", "转账", "下单", "购买", "抢票", "退款", "删除", "取消订单", "修改")
+    }
+}
