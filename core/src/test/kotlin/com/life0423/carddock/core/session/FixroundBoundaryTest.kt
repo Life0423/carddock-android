@@ -78,4 +78,42 @@ class FixroundBoundaryTest {
         collection.update { list -> list.map { card -> card.copy(title = "下一次写入") } }
         assertEquals("已提交新卡必须保留，或应暂停旧内存继续写入", listOf("user", "new"), disk.map { it.id })
     }
+
+    @Test
+    fun retryAfterRecoveryWriteFailureMustNotReintroduceOrphanRunningPhase() = runTest {
+        var disk = listOf(old.copy(run = RunInfo("before-process-death", RunPhase.RUNNING)))
+        val store = object : CardStore {
+            override suspend fun load() = disk
+            override suspend fun save(cards: List<CardRecord>) {
+                throw IOException("disk remains unwritable")
+            }
+        }
+        val collection = CardCollection(store, {}, { 100 })
+        collection.initialize(emptyList())
+        assertEquals(RunPhase.INTERRUPTED, collection.find(old.id)!!.run!!.phase)
+        var deviceCalls = 0
+        val runs = RunCoordinator(
+            collection,
+            RuleEngine(object : DeviceGateway {
+                override suspend fun inspect(sourceId: String, targetKey: String): DeviceResponse {
+                    deviceCalls += 1
+                    return DeviceResponse.Ready(DeviceSnapshot("source", "fixed", mapOf("status" to "ok")))
+                }
+            }),
+            Mutex(),
+            backgroundScope,
+            { 100 },
+            { "new-run" },
+        )
+        runs.start(old.id)
+        runCurrent()
+        val phase = collection.find(old.id)!!.run!!.phase
+        runs.cancel(old.id)
+        runCurrent()
+        assertEquals(0, deviceCalls)
+        assertFalse("没有活动 job，不得复活磁盘旧 RUNNING", phase in setOf(RunPhase.RUNNING, RunPhase.QUEUED))
+        assertFalse(
+            collection.find(old.id)!!.run!!.phase in setOf(RunPhase.RUNNING, RunPhase.QUEUED),
+        )
+    }
 }

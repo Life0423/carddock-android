@@ -80,7 +80,15 @@ internal class RunCoordinator(
                     startedAt = now(),
                 )) else it
             } }
-            if (!queued) return
+            if (!queued) {
+                // 排队没写上时，重载可能把磁盘里没有对应 job 的 RUNNING/QUEUED 装回来。
+                // 只收敛这一张卡；这次尚未开始读设备，也不取消其他正在运行的任务。
+                val stale = cards.find(cardId)?.run
+                if (stale != null && stale.phase in setOf(RunPhase.QUEUED, RunPhase.RUNNING)) {
+                    cards.showStorageFailure(cardId, stale.id)
+                }
+                return
+            }
             lane.withLock {
                 currentCoroutineContext().ensureActive()
                 update(cardId, runId) { it.copy(run = it.run!!.copy(
