@@ -17,7 +17,7 @@
 - **跨 App 找功能**：常用操作分散在不同应用里，打开路径长、记不住。卡坞希望把这些入口收到一处，按卡片组织。
 - **中断后续办**：做事常被打断。把「下一步要做的事」落成卡片，回来时能接着办，而不是重新在各个 App 里找一遍。
 
-当前阶段不做空泛的「Agent」承诺；先把卡片空间与重组能力做扎实。
+目标是由 Agent 记住你常用的功能和中断的地方，帮你直达功能、接着办完。
 
 ## 当前状态
 
@@ -27,23 +27,32 @@
 
 | 项 | 说明 |
 |---|---|
-| 语言 | Kotlin（计划） |
-| 平台 | Android 9.0（API 28）及以上 |
+| 语言 | Kotlin |
+| UI | Jetpack Compose |
+| 平台 | Android 9.0（API 28）及以上；compileSdk / targetSdk 37 |
+| 构建 | Android Gradle Plugin 9.5.1，Gradle 9.6.1 |
+| JDK | 17（`jvmToolchain`） |
 | 许可证 | Apache License 2.0 |
 
-具体模块划分与依赖版本以工程落地后的 Gradle 配置为准。
+具体模块划分与其余依赖版本以 Gradle 配置为准。
 
 ## 如何构建
 
-**【未验证】** 截至文档撰写时（2026-11-09，北京时间），[Life0423/carddock-android](https://github.com/Life0423/carddock-android) 尚无工程骨架与可运行的 Gradle 工程，因此这里**不写未跑通的构建命令**。
+环境要求：
 
-工程骨架合并后，本段将改为真实命令（例如 `./gradlew :app:assembleDebug`），并附上在本机实际跑通的输出证据。
+- JDK 17
+- Android SDK，compileSdk / targetSdk 37，minSdk 28
 
-本地开发环境预期（待与工程对齐后更新）：
+克隆仓库后，在根目录构建并跑单测：
 
-- JDK（版本以 `build.gradle` / toolchain 为准）
-- Android SDK，`minSdk` 不低于 28
-- Android Studio 或命令行 Gradle
+```bash
+git clone https://github.com/Life0423/carddock-android.git
+cd carddock-android
+./gradlew :app:assembleDebug
+./gradlew :app:testDebugUnitTest
+```
+
+Debug APK 在 `app/build/outputs/apk/debug/app-debug.apk`。
 
 ## 贡献
 
