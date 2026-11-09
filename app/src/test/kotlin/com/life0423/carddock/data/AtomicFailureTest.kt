@@ -1,5 +1,6 @@
 package com.life0423.carddock.data
 
+import android.app.Application
 import android.content.Context
 import androidx.core.util.AtomicFile
 import com.life0423.carddock.core.engine.RuleEngine
@@ -44,9 +45,10 @@ import org.robolectric.annotation.Config
 /**
  * 用 AtomicFile 子类只替换 I/O 接缝。save、load 和 PrototypeController 仍走生产实现。
  * 读回失败注入发生在 finishWrite 真正返回之后。
+ * 用普通 Application，避免真实 CardDockApplication 在同一文件上并发写。
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [28])
+@Config(sdk = [28], application = Application::class)
 class AtomicFailureTest {
     private lateinit var context: Context
     private lateinit var base: File

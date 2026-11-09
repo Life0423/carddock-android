@@ -62,16 +62,14 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
                 file.failWrite(output)
                 throw error
             }
-            // finishWrite 的 rename 失败只记日志，openRead 也可能在文件已经换上之后失败。
-            // 以正式文件的字节为准：已经是本次内容就视为成功，避免磁盘新而调用方仍保留旧内存。
+            // finishWrite 返回后不再 failWrite。1.15.0 的 failWrite 只删除 .new，不删除正式文件，也不能把已换上的内容滚回去。
             if (!baseFileHas(bytes)) {
-                file.failWrite(output)
                 throw IOException("Atomic card replacement did not complete")
             }
         }
     }
 
-    /** 只认正式文件。目录、读失败或字节不符都表示这次替换没有完成。 */
+    /** 仅在正式文件可读且字节一致时确认成功。false 可能是未提交，也可能只是无法确认，不能据此回滚。 */
     private fun baseFileHas(bytes: ByteArray): Boolean {
         val base = file.baseFile
         if (!base.isFile) return false

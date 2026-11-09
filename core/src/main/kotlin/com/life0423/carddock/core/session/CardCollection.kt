@@ -87,7 +87,7 @@ internal class CardCollection(
     private suspend fun persist(cards: List<CardRecord>): Boolean {
         return try {
             currentCoroutineContext().ensureActive()
-            // 取消不能把磁盘提交和内存发布拆开。
+            // 成功路径里，取消不能把磁盘提交和内存发布拆开。失败后的对齐在下面，并且不能被取消跳过。
             withContext(NonCancellable) {
                 store.save(cards)
                 mutableState.value = CardCollectionState(loading = false, cards = cards)
@@ -96,16 +96,19 @@ internal class CardCollection(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            // save 抛错时正式文件可能已经换成新内容。先重载，让内存跟上磁盘，避免下一次写入用旧集合盖掉新卡。
-            reconcileAfterFailedSave(cards)
+            // 调用方可能已经取消。先对齐磁盘再把取消传出去；协调被跳过时，旧内存仍可写，会盖掉已提交的新卡。
+            val reconciled = withContext(NonCancellable) { reconcileAfterFailedSave(cards) }
+            currentCoroutineContext().ensureActive()
+            reconciled
         }
     }
 
-    /** 返回 true 表示磁盘上已经是本次要保存的集合。无法读取时暂停后续写入。 */
+    /** 返回 true 表示磁盘上已经是本次要保存的集合。读失败只说明无法确认，不等于没有提交；那时暂停后续写入。 */
     private suspend fun reconcileAfterFailedSave(attempted: List<CardRecord>): Boolean {
         val onDisk = try {
             store.load()
         } catch (cancelled: CancellationException) {
+            // 取消不是读失败，不能在这里当成未提交。外层会在不可取消的协调之后再传播取消。
             throw cancelled
         } catch (_: Exception) {
             readable = false
