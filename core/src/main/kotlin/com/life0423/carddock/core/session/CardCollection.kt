@@ -30,19 +30,28 @@ internal class CardCollection(
     private var readable = true
 
     suspend fun initialize(initialCards: List<CardRecord>) = lock.withLock {
+        val stored = try {
+            store.load()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            readable = false
+            mutableState.value = CardCollectionState(loading = false)
+            notify("本地演示数据无法读取，原文件未覆盖。可在“我的”中重置演示。")
+            return@withLock
+        }
+        val restored = (stored ?: initialCards).map { card ->
+            val run = card.run
+            if (run != null && run.phase in setOf(RunPhase.QUEUED, RunPhase.RUNNING, RunPhase.NEEDS_USER)) {
+                card.copy(run = run.copy(
+                    phase = RunPhase.INTERRUPTED,
+                    message = "上次运行已中断，请重新刷新核验",
+                    endedAt = now(),
+                ))
+            } else card
+        }
+        currentCoroutineContext().ensureActive()
         try {
-            val stored = store.load()
-            val restored = (stored ?: initialCards).map { card ->
-                val run = card.run
-                if (run?.phase in setOf(RunPhase.QUEUED, RunPhase.RUNNING, RunPhase.NEEDS_USER)) {
-                    card.copy(run = run!!.copy(
-                        phase = RunPhase.INTERRUPTED,
-                        message = "上次运行已中断，请重新刷新核验",
-                        endedAt = now(),
-                    ))
-                } else card
-            }
-            currentCoroutineContext().ensureActive()
             withContext(NonCancellable) {
                 if (stored == null || restored != stored) store.save(restored)
                 mutableState.value = CardCollectionState(loading = false, cards = restored)
@@ -50,9 +59,9 @@ internal class CardCollection(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            readable = false
-            mutableState.value = CardCollectionState(loading = false)
-            notify("本地演示数据无法读取，原文件未覆盖。可在“我的”中重置演示。")
+            // 读已经成功。写回中断态失败不能当成文件损坏，否则界面会空掉并引导用户用种子卡重置。
+            mutableState.value = CardCollectionState(loading = false, cards = restored)
+            notify("恢复状态未能写回，原内容仍在。可以稍后重试。")
         }
     }
 
