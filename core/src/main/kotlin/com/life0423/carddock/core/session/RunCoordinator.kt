@@ -115,19 +115,22 @@ internal class RunCoordinator(
             }
         } catch (cancelled: CancellationException) {
             withContext(NonCancellable) {
-                update(cardId, runId) { it.copy(run = it.run!!.copy(
+                // update 为 false 时终态没有发布。若不改内存阶段，job 清掉后取消按钮不再有目标，卡片会停在 RUNNING/QUEUED。
+                val persisted = update(cardId, runId) { it.copy(run = it.run!!.copy(
                     phase = RunPhase.CANCELLED,
                     message = "已取消，上次有效结果仍保留",
                     endedAt = now(),
                 )) }
+                if (!persisted) cards.showStorageFailure(cardId, runId)
             }
             throw cancelled
         } catch (_: Exception) {
-            update(cardId, runId) { it.copy(run = it.run!!.copy(
+            val persisted = update(cardId, runId) { it.copy(run = it.run!!.copy(
                 phase = RunPhase.FAILED,
                 message = "本次读取失败，请重试",
                 endedAt = now(),
             )) }
+            if (!persisted) cards.showStorageFailure(cardId, runId)
         } finally {
             synchronized(jobs) { if (jobs[cardId] === job) jobs.remove(cardId) }
         }
