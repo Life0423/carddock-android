@@ -40,16 +40,7 @@ internal class CardCollection(
             notify("本地演示数据无法读取，原文件未覆盖。可在“我的”中重置演示。")
             return@withLock
         }
-        val restored = (stored ?: initialCards).map { card ->
-            val run = card.run
-            if (run != null && run.phase in setOf(RunPhase.QUEUED, RunPhase.RUNNING, RunPhase.NEEDS_USER)) {
-                card.copy(run = run.copy(
-                    phase = RunPhase.INTERRUPTED,
-                    message = "上次运行已中断，请重新刷新核验",
-                    endedAt = now(),
-                ))
-            } else card
-        }
+        val restored = settleBusyLoadedFromDisk(stored ?: initialCards)
         currentCoroutineContext().ensureActive()
         try {
             withContext(NonCancellable) {
@@ -119,10 +110,28 @@ internal class CardCollection(
             notify("保存失败，本次更改未提交。请检查设备空间后重试。")
             return false
         }
-        mutableState.value = CardCollectionState(loading = false, cards = onDisk)
-        if (onDisk == attempted) return true
+        // 磁盘就是这次提交的内容时，进行中的任务可能还活着，不能改阶段。
+        // 内容对不上说明这次没写上；盘上的 RUNNING/QUEUED/NEEDS_USER 没有活动保存，按启动恢复收成已中断。
+        val committed = onDisk == attempted
+        val published = if (committed) onDisk else settleBusyLoadedFromDisk(onDisk)
+        mutableState.value = CardCollectionState(loading = false, cards = published)
+        if (committed) return true
         notify("保存失败，本次更改未提交。请检查设备空间后重试。")
         return false
+    }
+
+    /** 从磁盘装回、且这次没有成功提交时，没有活动任务的忙碌阶段不能原样进内存。 */
+    private fun settleBusyLoadedFromDisk(cards: List<CardRecord>): List<CardRecord> = cards.map { card ->
+        val run = card.run
+        if (run != null && run.phase in setOf(RunPhase.QUEUED, RunPhase.RUNNING, RunPhase.NEEDS_USER)) {
+            card.copy(run = run.copy(
+                phase = RunPhase.INTERRUPTED,
+                message = "上次运行已中断，请重新刷新核验",
+                endedAt = now(),
+            ))
+        } else {
+            card
+        }
     }
 
     fun showStorageFailure(cardId: String, runId: String) {

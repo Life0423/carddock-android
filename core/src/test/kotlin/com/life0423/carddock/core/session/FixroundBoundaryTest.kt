@@ -7,9 +7,11 @@ import com.life0423.carddock.core.model.RunPhase
 import com.life0423.carddock.core.model.TemplateDefinition
 import com.life0423.carddock.core.model.TemplateKind
 import com.life0423.carddock.core.port.CardStore
+import com.life0423.carddock.core.port.CompileResult
 import com.life0423.carddock.core.port.DeviceGateway
 import com.life0423.carddock.core.port.DeviceResponse
 import com.life0423.carddock.core.port.DeviceSnapshot
+import com.life0423.carddock.core.port.RuleCompiler
 import com.life0423.carddock.core.rule.RuleSpec
 import com.life0423.carddock.core.rule.RuleStep
 import java.io.IOException
@@ -114,6 +116,64 @@ class FixroundBoundaryTest {
         assertFalse("没有活动 job，不得复活磁盘旧 RUNNING", phase in setOf(RunPhase.RUNNING, RunPhase.QUEUED))
         assertFalse(
             collection.find(old.id)!!.run!!.phase in setOf(RunPhase.RUNNING, RunPhase.QUEUED),
+        )
+    }
+
+    @Test
+    fun failedUpdateAfterRecoveryWriteFailureMustNotPublishDiskRunningWithoutJob() = runTest {
+        var disk = listOf(old.copy(run = RunInfo("before-process-death", RunPhase.RUNNING)))
+        val store = object : CardStore {
+            override suspend fun load() = disk
+            override suspend fun save(cards: List<CardRecord>) {
+                throw IOException("still unwritable")
+            }
+        }
+        val collection = CardCollection(store, {}, { 100 })
+        collection.initialize(emptyList())
+        assertEquals(RunPhase.INTERRUPTED, collection.find(old.id)!!.run!!.phase)
+        val updated = collection.update { list -> list.map { it.copy(title = "touch") } }
+        assertFalse(updated)
+        val phase = collection.find(old.id)!!.run!!.phase
+        assertFalse(
+            "失败 reconcile 不得把无 job 的磁盘旧 RUNNING/QUEUED 装回内存",
+            phase in setOf(RunPhase.RUNNING, RunPhase.QUEUED),
+        )
+    }
+
+    @Test
+    fun deleteAfterRecoveryWriteFailureMustNotLeaveOrphanRunning() = runTest {
+        var disk = listOf(old.copy(run = RunInfo("before-process-death", RunPhase.RUNNING)))
+        val store = object : CardStore {
+            override suspend fun load() = disk
+            override suspend fun save(cards: List<CardRecord>) {
+                throw IOException("unwritable")
+            }
+        }
+        val template = TemplateDefinition("t", "模板", "演示", TemplateKind.EXPRESS, "快递", rule)
+        val controller = PrototypeController(
+            store,
+            object : RuleCompiler {
+                override suspend fun compile(prompt: String) = CompileResult.Success(template)
+            },
+            RuleEngine(object : DeviceGateway {
+                override suspend fun inspect(sourceId: String, targetKey: String) =
+                    DeviceResponse.Ready(DeviceSnapshot("source", "fixed", mapOf("status" to "ok")))
+            }),
+            listOf(template),
+            backgroundScope,
+        )
+        controller.initialize()
+        runCurrent()
+        assertEquals(RunPhase.INTERRUPTED, controller.state.value.cards.single().run!!.phase)
+        controller.actions.deleteCard(old.id)
+        runCurrent()
+        val phase = controller.state.value.cards.single().run!!.phase
+        controller.actions.cancelCard(old.id)
+        runCurrent()
+        val afterCancel = controller.state.value.cards.single().run!!.phase
+        assertFalse(
+            "删卡失败后的 reconcile 不得留下无 job 的 RUNNING/QUEUED",
+            phase in setOf(RunPhase.RUNNING, RunPhase.QUEUED) || afterCancel in setOf(RunPhase.RUNNING, RunPhase.QUEUED),
         )
     }
 }
