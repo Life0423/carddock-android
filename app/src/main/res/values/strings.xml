@@ -1,0 +1,4 @@
+<resources>
+    <!-- 启动器上显示的产品名。工程名仍是 CardDock。 -->
+    <string name="app_name">卡坞</string>
+</resources>
