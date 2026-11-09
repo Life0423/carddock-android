@@ -6,7 +6,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-/** 排版沿用 Empty Activity 模板的 bodyLarge。品牌字体还没定。 */
+/** 默认排版。品牌字体还没定，所以只覆盖正文，其余用 Material 默认。 */
 val Typography =
   Typography(
     bodyLarge =
@@ -17,20 +17,4 @@ val Typography =
         lineHeight = 24.sp,
         letterSpacing = 0.5.sp,
       )
-    /* Other default text styles to override
-    titleLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = 0.sp
-    ),
-    labelSmall = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 16.sp,
-        letterSpacing = 0.5.sp
-    )
-    */
   )
