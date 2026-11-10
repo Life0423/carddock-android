@@ -8,6 +8,7 @@ import com.life0423.carddock.demo.TemplateCatalog
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -67,33 +68,40 @@ class AtomicFileCardStoreRaceTest {
         val cardsA = listOf(card("writer-a"))
         val cardsB = listOf(card("writer-b"))
 
-        val first = async(Dispatchers.IO) { runCatching { storeA.save(cardsA) } }
-        renamedA.await()
-        val second = async(Dispatchers.IO) {
-            startedB.countDown()
-            try {
-                runCatching { storeB.save(cardsB) }
-            } finally {
-                finishedB.countDown()
+        try {
+            val first = async(Dispatchers.IO) { runCatching { storeA.save(cardsA) } }
+            assertTrue("A 未到达提交门闩", renamedA.await(10, TimeUnit.SECONDS))
+            val second = async(Dispatchers.IO) {
+                try {
+                    startedB.countDown()
+                    runCatching { storeB.save(cardsB) }
+                } finally {
+                    startedB.countDown()
+                    finishedB.countDown()
+                }
             }
-        }
 
-        val resultA = first.await()
-        val resultB = second.await()
-        assertTrue(
-            "两个实例并发写同一文件不应失败，A 实际: ${resultA.exceptionOrNull()}",
-            resultA.isSuccess,
-        )
-        assertTrue(
-            "两个实例并发写同一文件不应失败，B 实际: ${resultB.exceptionOrNull()}",
-            resultB.isSuccess,
-        )
-        val loaded = storeA.load()
-        assertTrue(
-            "读回必须是某一次完整写入，实际 ${loaded?.map { it.id }}",
-            loaded == cardsA || loaded == cardsB,
-        )
-        assertEquals(loaded, storeB.load())
+            val resultA = first.await()
+            val resultB = second.await()
+            assertTrue(
+                "两个实例并发写同一文件不应失败，A 实际: ${resultA.exceptionOrNull()}",
+                resultA.isSuccess,
+            )
+            assertTrue(
+                "两个实例并发写同一文件不应失败，B 实际: ${resultB.exceptionOrNull()}",
+                resultB.isSuccess,
+            )
+            val loaded = storeA.load()
+            assertTrue(
+                "读回必须是某一次完整写入，实际 ${loaded?.map { it.id }}",
+                loaded == cardsA || loaded == cardsB,
+            )
+            assertEquals(loaded, storeB.load())
+        } finally {
+            renamedA.countDown()
+            startedB.countDown()
+            finishedB.countDown()
+        }
     }
 
     private fun install(store: AtomicFileCardStore, gate: Gate) {
@@ -124,11 +132,11 @@ class AtomicFileCardStoreRaceTest {
             super.finishWrite(stream)
             if (role != "A") return
             renamedA.countDown()
-            startedB.await()
+            check(startedB.await(10, TimeUnit.SECONDS)) { "B 未启动" }
             val sameLock = mutexOf(storeA) === mutexOf(storeB)
             // B 已经出发。同一把锁被 A 占着时，B 只能等 A 离开临界区，这里不能反过来等 B。
             if (sameLock && mutexOf(storeA).isLocked) return
-            finishedB.await()
+            check(finishedB.await(10, TimeUnit.SECONDS)) { "B 未结束" }
         }
     }
 }

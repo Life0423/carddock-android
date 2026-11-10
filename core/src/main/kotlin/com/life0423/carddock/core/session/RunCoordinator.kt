@@ -66,7 +66,9 @@ internal class RunCoordinator(
         active.forEach { it.join() }
     }
 
-    /** 这张卡的协程还没结束，取消过程中也算。磁盘上的忙碌卡没有对应条目，那是上次进程留下的。 */
+    /** 按卡片查询未结束的协程，取消收尾中也返回 true。
+     * 无活协程不等于崩溃残留：正常 NEEDS_USER 同样会结束设备协程；恢复策略由 CardCollection 决定。
+     */
     fun hasLiveJob(cardId: String): Boolean =
         synchronized(jobs) { jobs[cardId]?.isCompleted == false }
 

@@ -111,7 +111,7 @@ internal class CardCollection(
             notify("保存失败，本次更改未提交。请检查设备空间后重试。")
             return false
         }
-        // 磁盘就是这次提交时，进行中的阶段原样留下。没写上时只打断没有活协程的忙碌卡。
+        // 磁盘就是这次提交时，进行中的阶段原样留下。没写上时收掉没有活协程的忙碌卡；没有活协程不表示这是崩溃残留。
         val committed = onDisk == attempted
         val published = if (committed) onDisk else settleBusyLoadedFromDisk(onDisk)
         mutableState.value = CardCollectionState(loading = false, cards = published)
@@ -121,9 +121,10 @@ internal class CardCollection(
     }
 
     /**
-     * 从磁盘装回的忙碌卡，只有没有活协程时才收成已中断。
-     * 启动时还没有任何任务，崩溃留下的 RUNNING/QUEUED/NEEDS_USER 会全部收掉。
-     * 另一张卡保存失败时，正在跑的任务仍在协程表里，内存里的阶段要留着，不能改成已中断。
+     * 从磁盘装回的忙碌卡，没有活协程时收成已中断。
+     * 启动时任务表是空的，上次进程留下的 QUEUED/RUNNING/NEEDS_USER 会全部收掉。
+     * 无活协程不等于崩溃残留：本进程里正常结束设备协程的 NEEDS_USER 也会被收掉，这是当前策略。
+     * 协程还在的任务留在内存里的阶段。
      */
     private fun settleBusyLoadedFromDisk(cards: List<CardRecord>): List<CardRecord> {
         val current = state.value.cards.associateBy { it.id }
