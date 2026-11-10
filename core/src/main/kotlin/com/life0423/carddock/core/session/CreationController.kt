@@ -17,8 +17,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 
 /** A draft belongs to one editing session. Late results cannot update a reopened sheet. */
 internal class CreationController(
@@ -27,7 +25,6 @@ internal class CreationController(
     private val cards: CardCollection,
     private val lane: Mutex,
     private val scope: CoroutineScope,
-    private val json: Json,
     private val now: () -> Long,
     private val newId: () -> String,
     private val notify: (String) -> Unit,
@@ -61,7 +58,6 @@ internal class CreationController(
             phase = RunPhase.IDLE,
             preview = null,
             message = "",
-            ruleJson = "",
         )
     }
 
@@ -76,7 +72,7 @@ internal class CreationController(
         val token = generation
         mutableDraft.value = current.copy(
             phase = RunPhase.QUEUED, preview = null, template = null,
-            ruleJson = "", message = "正在匹配演示模板…",
+            message = "正在匹配演示模板…",
         )
         work = scope.launch {
             try {
@@ -88,7 +84,6 @@ internal class CreationController(
                         edit(token) { it.copy(
                             template = compiled.template,
                             title = it.title.ifBlank { compiled.template.title },
-                            ruleJson = json.encodeToString(compiled.template.rule),
                             message = "等待设备操作通道",
                         ) }
                         lane.withLock {

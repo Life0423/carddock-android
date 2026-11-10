@@ -27,7 +27,6 @@ class AppContainer(context: Context) {
         templates = templates,
         scope = applicationScope,
         setDeviceScenario = device::setScenario,
-        json = json,
     )
 
     init { applicationScope.launch { controller.initialize() } }

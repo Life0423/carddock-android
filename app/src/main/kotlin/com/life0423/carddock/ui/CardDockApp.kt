@@ -9,10 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Dashboard
-import androidx.compose.material.icons.rounded.GridView
-import androidx.compose.material.icons.rounded.PersonOutline
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -110,7 +106,7 @@ private fun BrandHeader() {
 private fun DockNavigation(selectedTab: Int, onSelect: (Int) -> Unit) {
     val labels = listOf("空间", "模板", "我的")
     val tags = listOf("space", "templates", "profile")
-    val icons = listOf(Icons.Rounded.Dashboard, Icons.Rounded.GridView, Icons.Rounded.PersonOutline)
+    val icons = listOf(DockIcons.Dashboard, DockIcons.GridView, DockIcons.PersonOutline)
     NavigationBar(containerColor = DockColors.Background, tonalElevation = 0.dp) {
         labels.forEachIndexed { index, label ->
             NavigationBarItem(

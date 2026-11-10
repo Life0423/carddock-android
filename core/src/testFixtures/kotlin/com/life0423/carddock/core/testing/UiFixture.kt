@@ -1,4 +1,4 @@
-package com.life0423.carddock.ui
+package com.life0423.carddock.core.testing
 
 import com.life0423.carddock.core.model.CardRecord
 import com.life0423.carddock.core.model.CardSnapshot
@@ -12,23 +12,15 @@ import com.life0423.carddock.core.rule.RuleStep
 import com.life0423.carddock.core.session.PrototypeActions
 import com.life0423.carddock.core.session.PrototypeState
 
-/** Deliberately static UI fixtures: no compiler, device, disk, clock or network. */
-internal object UiFixture {
+/**
+ * 界面测试的静态状态，不启动编译器、设备或磁盘。
+ *
+ * 模板列表由调用方传入。生产目录在 app 的 TemplateCatalog，这里不再抄一份标题和文案。
+ * [card] 只负责空间页的展示样本，它的规则不会被执行。
+ */
+object UiFixture {
     private const val fetchedAt = 1_794_218_400_000L
 
-    val express = template(
-        "express", "待取快递", TemplateKind.EXPRESS,
-        "取件信息集中展示，出门前看一眼就够了。", "把我的待取快递放到空间",
-    )
-    val delivery = template(
-        "delivery", "配送进度", TemplateKind.DELIVERY,
-        "追踪一份配送的当前状态与预计到达时间。", "查看我的配送进度",
-    )
-    val travel = template(
-        "travel", "下一程出行", TemplateKind.TRAVEL,
-        "把下一程的车次、出发时间与检票口放在一起。", "把下一程出行放到空间",
-    )
-    val templates = listOf(express, delivery, travel)
     val snapshot = CardSnapshot(
         fields = listOf(
             FieldValue("code", "取件码", "8-26-1088"),
@@ -41,11 +33,13 @@ internal object UiFixture {
         id = "express-card",
         title = "我的待取快递",
         kind = TemplateKind.EXPRESS,
-        rule = express.rule,
+        rule = displayRule("express-card"),
         snapshot = snapshot,
         run = RunInfo("run-express", RunPhase.SUCCEEDED),
     )
-    val state = PrototypeState(
+
+    /** 用调用方给出的模板拼一屏可点击的空间和模板页。templates 原样放进状态，不在这里改标题。 */
+    fun state(templates: List<TemplateDefinition>) = PrototypeState(
         loading = false,
         cards = listOf(
             card,
@@ -53,7 +47,7 @@ internal object UiFixture {
                 id = "delivery-card",
                 title = "午餐配送",
                 kind = TemplateKind.DELIVERY,
-                rule = delivery.rule,
+                rule = displayRule("delivery-card"),
                 snapshot = CardSnapshot(
                     listOf(
                         FieldValue("status", "当前状态", "配送途中"),
@@ -66,6 +60,7 @@ internal object UiFixture {
         templates = templates,
     )
 
+    /** 把界面回调记成事件名，测试只断言用户点了什么。 */
     fun actions(events: MutableList<String>) = PrototypeActions(
         openCreator = { events += "open:${it?.id ?: "blank"}" },
         closeCreator = { events += "close" },
@@ -82,27 +77,14 @@ internal object UiFixture {
         dismissNotice = { events += "notice" },
     )
 
-    private fun template(
-        id: String,
-        title: String,
-        kind: TemplateKind,
-        description: String,
-        prompt: String,
-    ) = TemplateDefinition(
-        id = id,
-        title = title,
-        description = description,
-        kind = kind,
-        examplePrompt = prompt,
-        rule = RuleSpec(
-            id = "rule-$id",
-            sourceId = "demo-$id",
-            targetKey = "sample-$id",
-            steps = listOf(
-                RuleStep.AssertTarget("sample-$id"),
-                RuleStep.ReadField("status", "status", "状态"),
-                RuleStep.RequireField("status"),
-            ),
+    private fun displayRule(id: String) = RuleSpec(
+        id = "rule-$id",
+        sourceId = "demo-$id",
+        targetKey = "sample-$id",
+        steps = listOf(
+            RuleStep.AssertTarget("sample-$id"),
+            RuleStep.ReadField("status", "status", "状态"),
+            RuleStep.RequireField("status"),
         ),
     )
 }

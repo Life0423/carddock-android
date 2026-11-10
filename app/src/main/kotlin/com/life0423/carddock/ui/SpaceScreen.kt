@@ -13,7 +13,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.AutoAwesomeMosaic
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -102,7 +101,7 @@ private fun EmptySpace(onAdd: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Icon(Icons.Rounded.AutoAwesomeMosaic, null, Modifier.size(36.dp), tint = DockColors.Mint)
+            Icon(DockIcons.AutoAwesomeMosaic, null, Modifier.size(36.dp), tint = DockColors.Mint)
             Text("先放进一张功能卡", style = MaterialTheme.typography.titleMedium)
             Text("取件、配送、出行，按你的需要组合。", color = DockColors.Muted)
             Button(onAdd) { Text("选择一个模板") }

@@ -6,6 +6,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -15,6 +16,8 @@ import androidx.compose.ui.test.performScrollToNode
 import com.life0423.carddock.core.model.RunInfo
 import com.life0423.carddock.core.model.RunPhase
 import com.life0423.carddock.core.session.CreationDraft
+import com.life0423.carddock.core.testing.UiFixture
+import com.life0423.carddock.demo.TemplateCatalog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -37,7 +40,7 @@ class CardDockUiTest {
     @Test
     fun navigationTemplatesAndResetDispatchExplicitActions() {
         val events = mutableListOf<String>()
-        compose.setContent { CardDockApp(UiFixture.state, UiFixture.actions(events)) }
+        compose.setContent { CardDockApp(UiFixture.state(TemplateCatalog.templates), UiFixture.actions(events)) }
 
         compose.onNodeWithTag("tab_space").assertIsSelected()
         compose.onNodeWithTag("open_creator").assertIsDisplayed()
@@ -45,11 +48,16 @@ class CardDockUiTest {
         compose.onNodeWithTag("open_creator").performClick()
 
         compose.onNodeWithTag("tab_templates").performClick().assertIsSelected()
+        compose.onNodeWithText("待取快递").assertIsDisplayed()
+        compose.onNodeWithText("外卖进度").assertIsDisplayed()
         compose.captureScreen("02-templates")
         val brand = compose.onNodeWithText("卡坞").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val heading = compose.onNodeWithText("从一个好用的模板开始").fetchSemanticsNode().boundsInRoot
         assertTrue("Template content must stay below the persistent brand bar", heading.top >= brand.bottom)
-        compose.onNodeWithTag("use_template_express").performScrollTo().performClick()
+        compose.onNodeWithTag("templates_list").performScrollToNode(hasText("出行安排"))
+        compose.onNodeWithText("出行安排").assertIsDisplayed()
+        compose.onNodeWithTag("templates_list").performScrollToNode(hasTestTag("use_template_express-pickup"))
+        compose.onNodeWithTag("use_template_express-pickup").performClick()
 
         compose.onNodeWithTag("tab_profile").performClick().assertIsSelected()
         compose.captureScreen("04-profile")
@@ -60,20 +68,21 @@ class CardDockUiTest {
         compose.onNodeWithTag("reset_demo").performClick()
         compose.onNodeWithTag("confirm_reset").assertIsDisplayed().performClick()
 
-        assertEquals(listOf("open:blank", "open:express", "scenario:READ_FAILURE", "reset"), events)
+        assertEquals(listOf("open:blank", "open:express-pickup", "scenario:READ_FAILURE", "reset"), events)
     }
 
     @Test
     fun creatorRequiresVerifiedPreviewAndSupportsRevalidationAfterTakeover() {
         val events = mutableListOf<String>()
+        val express = TemplateCatalog.templates.first { it.id == "express-pickup" }
         val draft = CreationDraft(
-            prompt = UiFixture.express.examplePrompt,
+            prompt = express.examplePrompt,
             title = "我的待取快递",
-            template = UiFixture.express,
+            template = express,
             phase = RunPhase.NEEDS_USER,
             message = "模拟页面需要确认后继续。",
         )
-        val state = mutableStateOf(UiFixture.state.copy(draft = draft))
+        val state = mutableStateOf(UiFixture.state(TemplateCatalog.templates).copy(draft = draft))
         compose.setContent { CardDockApp(state.value, UiFixture.actions(events)) }
 
         compose.onNodeWithTag("creator_save").performScrollTo().assertIsNotEnabled()
@@ -104,7 +113,7 @@ class CardDockUiTest {
     @Test
     fun cardSupportsRefreshCancellationTakeoverAndConfirmedRemoval() {
         val events = mutableListOf<String>()
-        val state = mutableStateOf(UiFixture.state.copy(cards = listOf(UiFixture.card)))
+        val state = mutableStateOf(UiFixture.state(TemplateCatalog.templates).copy(cards = listOf(UiFixture.card)))
         compose.setContent { CardDockApp(state.value, UiFixture.actions(events)) }
 
         compose.onNodeWithTag("space_list").performScrollToNode(hasTestTag("refresh_express-card"))

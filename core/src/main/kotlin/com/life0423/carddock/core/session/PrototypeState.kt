@@ -14,7 +14,6 @@ data class CreationDraft(
     val phase: RunPhase = RunPhase.IDLE,
     val preview: CardSnapshot? = null,
     val message: String = "",
-    val ruleJson: String = "",
 )
 
 data class PrototypeState(
