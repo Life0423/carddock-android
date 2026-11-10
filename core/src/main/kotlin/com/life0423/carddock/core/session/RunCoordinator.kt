@@ -66,6 +66,10 @@ internal class RunCoordinator(
         active.forEach { it.join() }
     }
 
+    /** 这张卡的协程还没结束，取消过程中也算。磁盘上的忙碌卡没有对应条目，那是上次进程留下的。 */
+    fun hasLiveJob(cardId: String): Boolean =
+        synchronized(jobs) { jobs[cardId]?.isCompleted == false }
+
     private suspend fun run(cardId: String) {
         val job = currentCoroutineContext()[Job]
         val runId = newId()

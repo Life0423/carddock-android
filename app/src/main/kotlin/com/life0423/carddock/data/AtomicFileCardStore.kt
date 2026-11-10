@@ -8,6 +8,7 @@ import com.life0423.carddock.core.rule.RuleValidator
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -19,10 +20,16 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-/** One application-scoped instance owns this private file; the mutex serializes reads and writes. */
+/**
+ * 把卡片集合写到应用私有目录的 cards-v1.json。
+ * 每个 AppContainer 都会 new 一个实例。实例自己的锁挡不住另一个实例，
+ * finishWrite 之后的字节校验会读到对方刚换上的内容。
+ * 所以同一进程里按规范化路径共用一把锁，读和写都走它。
+ * load 也要占这把锁：openRead 在正式文件还在时会删掉未完成的 .new。
+ */
 class AtomicFileCardStore(context: Context, private val json: Json) : CardStore {
     private val file = AtomicFile(File(context.applicationContext.filesDir, FILE_NAME))
-    private val lock = Mutex()
+    private val lock = lockFor(file.baseFile)
 
     override suspend fun load(): List<CardRecord>? = withContext(Dispatchers.IO) {
         lock.withLock {
@@ -96,5 +103,16 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
     private companion object {
         const val FILE_NAME = "cards-v1.json"
         const val STORAGE_VERSION = 1
+        private val locks = ConcurrentHashMap<String, Mutex>()
+
+        /** 先规范化路径，同一文件不会因为 ./ 或符号链接拿到两把锁。 */
+        private fun lockFor(base: File): Mutex {
+            val key = try {
+                base.canonicalPath
+            } catch (_: IOException) {
+                base.absolutePath
+            }
+            return locks.computeIfAbsent(key) { Mutex() }
+        }
     }
 }
