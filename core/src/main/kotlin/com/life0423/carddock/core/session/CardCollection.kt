@@ -23,6 +23,7 @@ internal class CardCollection(
     private val store: CardStore,
     private val notify: (String) -> Unit,
     private val now: () -> Long,
+    private val hasLiveJob: (cardId: String) -> Boolean = { false },
 ) {
     private val lock = Mutex()
     private val mutableState = MutableStateFlow(CardCollectionState())
@@ -110,8 +111,7 @@ internal class CardCollection(
             notify("保存失败，本次更改未提交。请检查设备空间后重试。")
             return false
         }
-        // 磁盘就是这次提交的内容时，进行中的任务可能还活着，不能改阶段。
-        // 内容对不上说明这次没写上；盘上的 RUNNING/QUEUED/NEEDS_USER 没有活动保存，按启动恢复收成已中断。
+        // 磁盘就是这次提交时，进行中的阶段原样留下。没写上时收掉没有活协程的忙碌卡；没有活协程不表示这是崩溃残留。
         val committed = onDisk == attempted
         val published = if (committed) onDisk else settleBusyLoadedFromDisk(onDisk)
         mutableState.value = CardCollectionState(loading = false, cards = published)
@@ -120,18 +120,27 @@ internal class CardCollection(
         return false
     }
 
-    /** 从磁盘装回、且这次没有成功提交时，没有活动任务的忙碌阶段不能原样进内存。 */
-    private fun settleBusyLoadedFromDisk(cards: List<CardRecord>): List<CardRecord> = cards.map { card ->
-        val run = card.run
-        if (run != null && run.phase in setOf(RunPhase.QUEUED, RunPhase.RUNNING, RunPhase.NEEDS_USER)) {
-            card.copy(run = run.copy(
-                phase = RunPhase.INTERRUPTED,
-                message = "上次运行已中断，请重新刷新核验",
-                endedAt = now(),
-            ))
-        } else {
-            card
+    /**
+     * 从磁盘装回的忙碌卡，没有活协程时收成已中断。
+     * 启动时任务表是空的，上次进程留下的 QUEUED/RUNNING/NEEDS_USER 会全部收掉。
+     * 无活协程不等于崩溃残留：本进程里正常结束设备协程的 NEEDS_USER 也会被收掉，这是当前策略。
+     * 协程还在的任务留在内存里的阶段。
+     */
+    private fun settleBusyLoadedFromDisk(cards: List<CardRecord>): List<CardRecord> {
+        val current = state.value.cards.associateBy { it.id }
+        return cards.map { card ->
+            if (hasLiveJob(card.id)) current[card.id] ?: card else interruptStaleBusy(card)
         }
+    }
+
+    private fun interruptStaleBusy(card: CardRecord): CardRecord {
+        val run = card.run ?: return card
+        if (run.phase !in setOf(RunPhase.QUEUED, RunPhase.RUNNING, RunPhase.NEEDS_USER)) return card
+        return card.copy(run = run.copy(
+            phase = RunPhase.INTERRUPTED,
+            message = "上次运行已中断，请重新刷新核验",
+            endedAt = now(),
+        ))
     }
 
     fun showStorageFailure(cardId: String, runId: String) {

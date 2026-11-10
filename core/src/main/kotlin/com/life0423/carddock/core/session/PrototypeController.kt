@@ -34,9 +34,16 @@ class PrototypeController(
 ) {
     private val notice = MutableStateFlow<String?>(null)
     private val scenario = MutableStateFlow(DemoScenario.NORMAL)
-    private val cards = CardCollection(store, ::notify, now)
+    // 构造属性按顺序初始化，runs 这时还不存在。查找放到 init，initialize 只会在构造完成之后调用。
+    private var liveJob: (String) -> Boolean = { false }
+    private val cards = CardCollection(store, ::notify, now) { liveJob(it) }
     private val lane = Mutex()
     private val runs = RunCoordinator(cards, engine, lane, scope, now, newId)
+
+    init {
+        liveJob = runs::hasLiveJob
+    }
+
     private val creator = CreationController(compiler, engine, cards, lane, scope, json, now, newId, ::notify)
     private var initialized = false
     private var resetting = false
