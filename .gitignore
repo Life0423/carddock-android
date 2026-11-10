@@ -5,6 +5,11 @@ local.properties
 *.jks
 *.keystore
 keystore.properties
+signing.properties
+google-services.json
+*.apk
+*.aab
+*.hprof
 .env
 .env.*
 !.env.example
