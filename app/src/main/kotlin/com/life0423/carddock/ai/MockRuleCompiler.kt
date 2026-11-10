@@ -37,8 +37,8 @@ class MockRuleCompiler(templates: List<TemplateDefinition>) : RuleCompiler {
     }
 
     /**
-     * 英文关键词用 ASCII 词边界，避免 train 命中 training。
-     * 中文不是 \w，词边界对不上，所以直接做子串包含。
+     * 英文关键词使用正则的词边界，避免 train 命中 training。
+     * 中文关键词直接做子串匹配，以便连续的中文描述能命中；这里不做自然语言分词。
      */
     private fun matches(request: String, keyword: String): Boolean =
         if (keyword.first() in 'a'..'z') {

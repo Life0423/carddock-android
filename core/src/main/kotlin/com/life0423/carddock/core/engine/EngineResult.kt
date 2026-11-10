@@ -2,7 +2,10 @@ package com.life0423.carddock.core.engine
 
 import com.life0423.carddock.core.model.CardSnapshot
 
-/** currentStep is the number of successfully completed rule steps. */
+/**
+ * currentStep is the number of successfully completed rule steps.
+ * 已经完成的规则步数，不是正在执行的下标。读设备之前会先报 0。
+ */
 data class RunProgress(
     val currentStep: Int,
     val totalSteps: Int,
@@ -15,7 +18,10 @@ data class RunProgress(
  */
 sealed interface EngineResult {
     data class Success(val snapshot: CardSnapshot) : EngineResult
-    /** [code] 给存储和测试区分原因，[message] 给界面，不包含设备异常原文。 */
+    /**
+     * [code] 给调用方和测试区分原因。会话不把它写入 RunInfo，RunInfo 也没有这个字段。
+     * [message] 给界面。inspect 抛出的异常会换成固定文案；DeviceResponse.Failed 自带的文案原样传过来。
+     */
     data class Failure(val code: String, val message: String) : EngineResult
     /** 引擎到此返回，不再执行后续步骤。会话结束这次运行并放开通道；之后的取消要另写终态。 */
     data class NeedsUser(val message: String) : EngineResult

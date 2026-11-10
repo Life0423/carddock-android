@@ -17,10 +17,12 @@ import kotlinx.coroutines.sync.Mutex
 import java.util.UUID
 
 /**
- * Application-scoped coordinator. Call its actions on the same dispatcher as [scope].
+ * Application-scoped coordinator. Actions and work on [scope] must share one serial dispatcher.
  * It contains no Android types, so lifecycle, storage and devices can be replaced independently.
  *
- * 动作必须和 [scope] 在同一调度器上调用。重置标志、初始化标志和创建代际都是普通变量，靠这个单线程约束避免并发写。
+ * 动作和 [scope] 上的控制器工作必须跑在同一个串行调度器上。生产用 Dispatchers.Main.immediate。
+ * 只是换成同一个多线程调度器，例如 Dispatchers.Default，并不能串行化这些写入。
+ * 初始化标志、重置标志和创建代际是普通变量，没有多线程保护。
  */
 class PrototypeController(
     store: CardStore,

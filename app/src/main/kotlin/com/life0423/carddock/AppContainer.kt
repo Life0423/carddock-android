@@ -16,7 +16,7 @@ import kotlinx.serialization.json.Json
 /**
  * The single composition root: replace adapters here without changing UI or the rule engine.
  *
- * scope 用 Main.immediate：控制器要求动作与 scope 同调度器，immediate 让已经在主线程上的点击不必再投递一圈。
+ * scope 用 Main.immediate，这是控制器要求的串行调度器。immediate 让已经在主线程上的点击不必再投递一圈。
  * SupervisorJob 让初始化失败不会取消其余子任务。
  */
 class AppContainer(context: Context) {

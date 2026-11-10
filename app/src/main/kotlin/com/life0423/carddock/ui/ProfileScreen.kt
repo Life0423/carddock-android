@@ -35,7 +35,8 @@ import com.life0423.carddock.ui.theme.DockColors
 
 /**
  * 演示场景从下一次读取开始生效，不追溯已经在延时里的那次。
- * 重置会先停掉当时表里的运行。本机卡片要等整表替换成功才换成种子，失败时原卡片还在，所以要先确认。
+ * 重置会先停掉当时表里的运行。界面上的种子只在提交被确认后才发布。
+ * 提交前失败时磁盘仍是旧内容。提交后若读回失败，replace 返回 false：磁盘上可能已是种子，内存仍是旧卡，并暂停后续写入。
  */
 @Composable
 internal fun ProfileScreen(scenario: DemoScenario, actions: PrototypeActions) {

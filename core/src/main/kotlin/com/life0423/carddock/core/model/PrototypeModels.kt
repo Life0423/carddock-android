@@ -28,7 +28,8 @@ data class CardSnapshot(
 
 /**
  * 运行阶段。QUEUED 与 RUNNING 是进行中；进程还在时通常有活协程。
- * 从磁盘装回且没有活协程时，集合会把这两种和 NEEDS_USER 收成 INTERRUPTED。
+ * 启动恢复，以及读回内容不等于本次提交的失败对账，会把没有活协程的 QUEUED、RUNNING、NEEDS_USER 收成 INTERRUPTED。
+ * 读回恰好等于本次提交时原样发布，不走这步收敛，没有活协程的 NEEDS_USER 也会留下。
  * NEEDS_USER 表示设备读取已经返回，取消不能只依赖仍在表里的 job。
  * INTERRUPTED 不是引擎的返回值。
  */

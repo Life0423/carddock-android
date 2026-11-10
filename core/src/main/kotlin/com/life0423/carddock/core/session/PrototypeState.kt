@@ -37,7 +37,8 @@ data class PrototypeState(
 
 /**
  * UI events are plain callbacks so previews and tests need no Android services.
- * 这些是普通函数，不含 Android 类型。调用线程必须和控制器的 scope 相同，代际和重置标志不是线程安全的。
+ * 这些是普通函数，不含 Android 类型。必须和控制器跑在同一个串行调度器上。
+ * 生产用 Dispatchers.Main.immediate。共用一个多线程调度器并不够，代际和重置标志没有多线程保护。
  */
 data class PrototypeActions(
     val openCreator: (TemplateDefinition?) -> Unit,

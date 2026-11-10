@@ -18,7 +18,11 @@ internal data class CardCollectionState(
     val cards: List<CardRecord> = emptyList(),
 )
 
-/** Serializes collection changes so an older save cannot overwrite a newer run. */
+/**
+ * Serializes collection changes so an older save cannot overwrite a newer run.
+ * 串行维护内存里的卡片集合，并整表写入存储。装回磁盘时用 hasLiveJob 留下仍在跑的任务。
+ * 这把锁只协调本集合，不把多个控制器收成一次读改写事务。
+ */
 internal class CardCollection(
     private val store: CardStore,
     private val notify: (String) -> Unit,
