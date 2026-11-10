@@ -1,5 +1,6 @@
 package com.life0423.carddock.data
 
+import android.app.Application
 import android.content.Context
 import androidx.core.util.AtomicFile
 import com.life0423.carddock.core.model.CardRecord
@@ -25,8 +26,12 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
+/**
+ * 不启动 CardDockApplication。它会再建一个写同一 cards-v1.json 的 store，
+ * 两把锁互不相让，读回校验会偶发失败。入口冒烟仍用真实 Application。
+ */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [28])
+@Config(sdk = [28], application = Application::class)
 class AtomicFileCardStoreTest {
     private lateinit var context: Context
     private lateinit var baseFile: File
