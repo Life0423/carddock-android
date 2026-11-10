@@ -115,7 +115,7 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
         private val locks = ConcurrentHashMap<String, Mutex>()
 
         /**
-         * 先规范化路径，同一文件不会因为 ./ 或符号链接拿到两把锁。
+         * 先规范化路径，同一文件不会因为 ./ 或父目录别名拿到两把锁。最终文件本身是符号链接不在支持范围：写入会替换链接，锁可能分裂。生产只用自己创建的普通文件。
          * 固定私有文件的锁随进程保留。路径规范化失败时按绝对路径降级，只串行单次 load 或 save。
          * 这不是跨进程锁，也不把多个控制器收成一次快照事务。
          */
