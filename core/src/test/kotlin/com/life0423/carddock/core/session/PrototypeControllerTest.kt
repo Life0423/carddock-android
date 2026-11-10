@@ -228,6 +228,7 @@ class PrototypeControllerTest {
         val store = MemoryCardStore(stored)
         val device = ObservedDevice(templates.associate { it.rule.sourceId to it.rule.targetKey })
         var id = 0
+        // 控制器挂在 backgroundScope 上，用例结束会取消它。设备和 now 都用虚拟时钟，避免两套时间。
         val controller = PrototypeController(
             store, FixedCompiler(templates.first()), RuleEngine(device) { testScheduler.currentTime }, templates,
             backgroundScope, device::setScenario, now = { testScheduler.currentTime }, newId = { "id-${++id}" },

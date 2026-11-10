@@ -14,6 +14,9 @@ import kotlinx.coroutines.ensureActive
 /**
  * Executes a bounded, read-only rule against one coherent device observation.
  * The caller owns queuing, persistence and lifecycle. This class never updates a saved card.
+ *
+ * 取消原样抛出，由会话决定卡片阶段。其它设备异常收成 DEVICE_ERROR，异常文本不进 [EngineResult.Failure.message]。
+ * 成功快照只保留规则读到的字段，时间用 [now]，观察结果里没有单独的时间。
  */
 class RuleEngine(
     private val device: DeviceGateway,
@@ -37,6 +40,7 @@ class RuleEngine(
         } catch (_: Exception) {
             return EngineResult.Failure("DEVICE_ERROR", "设备读取发生异常，请稍后重试。")
         }
+        // 设备若吞掉取消仍返回结果，这里照样抛出，避免把取消写成成功快照。
         currentCoroutineContext().ensureActive()
 
         val snapshot = when (response) {
@@ -80,6 +84,7 @@ class RuleEngine(
                 }
 
                 is RuleStep.RequireField -> {
+                    // 校验已要求该输出来自此前的 ReadField，这里不再做查找失败分支。
                     val value = values.getValue(step.outputKey)
                     if (value.value.isBlank()) {
                         return EngineResult.Failure("REQUIRED_FIELD_EMPTY", "“${value.label}”为空，结果未通过核验。")

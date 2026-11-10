@@ -43,7 +43,11 @@ import com.life0423.carddock.core.session.CreationDraft
 import com.life0423.carddock.core.session.PrototypeActions
 import com.life0423.carddock.ui.theme.DockColors
 
-/** Explicit trial-then-save flow. A changed prompt must be validated again. */
+/**
+ * Explicit trial-then-save flow. A changed prompt must be validated again.
+ * 按钮能否保存只看阶段、预览和标题。控制器还会拒绝缺少模板、正在写入和超过张数上限。
+ * 半展开会把试运行留在折叠线下，所以直接全展开。
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun CreatorSheet(

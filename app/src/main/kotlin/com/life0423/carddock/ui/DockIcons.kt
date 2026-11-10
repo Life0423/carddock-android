@@ -26,6 +26,8 @@ import androidx.compose.ui.unit.dp
  * 界面实际用到、且不在 material-icons-core 里的 Rounded 图标。
  * 路径与 AndroidX material-icons-extended 1.7.6 一致，视口 24dp，填充黑色以便 Icon 着色。
  * 版权：The Android Open Source Project，Apache License 2.0。
+ * 内联是为了不依赖 material-icons-extended：这里只用到其中几个图标，不必把整包扩展库放进依赖。
+ * 下面的路径数据是从该版本复制的，不再逐个加注释。
  */
 internal object DockIcons {
 

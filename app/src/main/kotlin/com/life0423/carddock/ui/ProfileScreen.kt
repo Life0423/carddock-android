@@ -33,6 +33,10 @@ import com.life0423.carddock.core.session.DemoScenario
 import com.life0423.carddock.core.session.PrototypeActions
 import com.life0423.carddock.ui.theme.DockColors
 
+/**
+ * 演示场景从下一次读取开始生效，不追溯已经在延时里的那次。
+ * 重置会先停掉当时表里的运行。本机卡片要等整表替换成功才换成种子，失败时原卡片还在，所以要先确认。
+ */
 @Composable
 internal fun ProfileScreen(scenario: DemoScenario, actions: PrototypeActions) {
     var confirmReset by remember { mutableStateOf(false) }

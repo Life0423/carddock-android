@@ -17,7 +17,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-/** One operation lane is shared with creator trials; observations never start work. */
+/**
+ * One operation lane is shared with creator trials; observations never start work.
+ * 收集状态或进度回调不会另开一次设备读取，只有 [start] 会。任务表用同步块保护，和协程调度器无关。
+ */
 internal class RunCoordinator(
     private val cards: CardCollection,
     private val engine: RuleEngine,
@@ -28,6 +31,13 @@ internal class RunCoordinator(
 ) {
     private val jobs = mutableMapOf<String, Job>()
 
+    /**
+     * 已有 isActive 的协程，或卡片不在集合里，直接返回。
+     * 取消收尾中 isActive 为 false，这道检查不会拦住，新的一次会盖掉表项。
+     * 用 LAZY 先放入表再 start。若先 launch 再登记，只有协程在第一次挂起前就进了 finally，
+     * 收尾才摘不掉这次 job：start 正持有同一把可重入的锁。launch 返回后会留下一个已结束任务。
+     * 正常读设备会先挂起，不走这条。
+     */
     fun start(cardId: String) {
         synchronized(jobs) {
             if (jobs[cardId]?.isActive == true || cards.find(cardId) == null) return
@@ -54,12 +64,14 @@ internal class RunCoordinator(
         }
     }
 
+    /** 取消并等到收尾写完。删除卡片前要用这个，而不是只发取消。 */
     suspend fun cancelAndJoin(cardId: String) {
         val job = synchronized(jobs) { jobs[cardId] }
         job?.cancel()
         job?.join()
     }
 
+    /** 只取消调用当时表里的任务。之后才登记的不在这次等待里。 */
     suspend fun cancelAll() {
         val active = synchronized(jobs) { jobs.values.toList() }
         active.forEach { it.cancel() }
@@ -87,8 +99,9 @@ internal class RunCoordinator(
                 )) else it
             } }
             if (!queued) {
-                // 排队没写上时，重载可能把磁盘里没有对应 job 的 RUNNING/QUEUED 装回来。
-                // 只收敛这一张卡；这次尚未开始读设备，也不取消其他正在运行的任务。
+                // 排队没写上。这次 job 还活着，对账会留下内存里的旧阶段，不会把磁盘上的忙碌阶段原样装回来。
+                // 没有活协程的其他卡会在对账里收成已中断。这里只在这张卡的内存阶段仍是排队或运行中时改成失败。
+                // 还没进设备通道，也不取消其他任务。
                 val stale = cards.find(cardId)?.run
                 if (stale != null && stale.phase in setOf(RunPhase.QUEUED, RunPhase.RUNNING)) {
                     cards.showStorageFailure(cardId, stale.id)
@@ -150,6 +163,10 @@ internal class RunCoordinator(
         }
     }
 
+    /**
+     * 只变换仍挂着这次 [runId] 的那张卡。runId 对不上或卡已删除时列表不变，返回 false。
+     * false 也可能是持久化没能确认提交，调用方要另做内存收尾。
+     */
     private suspend fun update(
         cardId: String,
         runId: String,

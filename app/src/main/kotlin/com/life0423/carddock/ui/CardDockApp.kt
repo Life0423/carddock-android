@@ -37,7 +37,11 @@ import com.life0423.carddock.core.session.PrototypeState
 import com.life0423.carddock.ui.theme.CardDockTheme
 import com.life0423.carddock.ui.theme.DockColors
 
-/** UI owns only presentation state. All domain mutations are explicit callbacks. */
+/**
+ * UI owns only presentation state. All domain mutations are explicit callbacks.
+ * 选中页用 rememberSaveable，旋转后还在原页。通知等 Snackbar 退出再清成 null，同一句才能再次投递。
+ * 保存一点击就切到空间页，不等写入成功；失败时弹层仍在，底下已经是空间。
+ */
 @Composable
 fun CardDockApp(state: PrototypeState, actions: PrototypeActions) {
     CardDockTheme {
@@ -45,6 +49,7 @@ fun CardDockApp(state: PrototypeState, actions: PrototypeActions) {
         val snackbarHost = remember { SnackbarHostState() }
         LaunchedEffect(state.notice) {
             state.notice?.let { message ->
+                // 等到这条 Snackbar 退出再把 notice 清成 null。留着同一句时，后面的相同文案不会再次投递。
                 snackbarHost.showSnackbar(message)
                 actions.dismissNotice()
             }
@@ -77,6 +82,7 @@ fun CardDockApp(state: PrototypeState, actions: PrototypeActions) {
                 templates = state.templates,
                 actions = actions.copy(saveDraft = {
                     actions.saveDraft()
+                    // 先切页再等结果。写入失败时草稿还在，弹层继续盖住已经切过来的空间页。
                     selectedTab = 0
                 }),
             )

@@ -29,6 +29,7 @@ import com.life0423.carddock.core.model.CardRecord
 import com.life0423.carddock.core.session.PrototypeActions
 import com.life0423.carddock.ui.theme.DockColors
 
+/** 空间页只展示已保存的卡。空列表不出现“我的功能卡”标题，只留添加入口。 */
 @Composable
 internal fun SpaceScreen(cards: List<CardRecord>, actions: PrototypeActions) {
     LazyColumn(

@@ -30,6 +30,10 @@ internal class CardCollection(
     val state = mutableState.asStateFlow()
     private var readable = true
 
+    /**
+     * 启动时加载。load 返回 null 表示没有文件，用 [initialCards] 创建。
+     * 读失败不覆盖原文件，并把集合标成不可写，直到整表替换成功。
+     */
     suspend fun initialize(initialCards: List<CardRecord>) = lock.withLock {
         val stored = try {
             store.load()
@@ -59,6 +63,12 @@ internal class CardCollection(
 
     fun find(id: String): CardRecord? = state.value.cards.find { it.id == id }
 
+    /**
+     * 在锁内基于当前列表计算新列表并持久化。
+     * 返回 false：仍在加载或不可写、变换前后列表相等，或保存没有得到一次已确认的提交。
+     * 读回抛错只表示无法确认，磁盘可能已经是新内容。读回得到 null 或另一份内容，则是确认没提交。
+     * 读回内容与本次要写的列表相同则返回 true。取消会抛出，不是 false。
+     */
     suspend fun update(transform: (List<CardRecord>) -> List<CardRecord>): Boolean = lock.withLock {
         if (!readable || state.value.loading) {
             notify("本地数据尚不可写，请先完成加载或重置演示。")
@@ -70,6 +80,7 @@ internal class CardCollection(
         persist(next)
     }
 
+    /** 整表替换。成功时恢复为可写；读失败后只有这条路径能重新允许 update。 */
     suspend fun replace(cards: List<CardRecord>): Boolean = lock.withLock {
         val saved = persist(cards)
         if (saved) readable = true
@@ -143,6 +154,10 @@ internal class CardCollection(
         ))
     }
 
+    /**
+     * update 返回 false、这次运行的终态没进集合时使用。
+     * 只改内存里 runId 相同的那次运行，不再写盘。对不上就不动。
+     */
     fun showStorageFailure(cardId: String, runId: String) {
         val current = state.value
         mutableState.value = current.copy(cards = current.cards.map { card ->

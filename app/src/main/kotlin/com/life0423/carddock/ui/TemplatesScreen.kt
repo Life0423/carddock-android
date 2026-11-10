@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import com.life0423.carddock.core.model.TemplateDefinition
 import com.life0423.carddock.ui.theme.DockColors
 
+/** 模板页不执行规则。点试用会带着该模板打开草稿，提示词由控制器预填，规则仍要试运行后才保存。 */
 @Composable
 internal fun TemplatesScreen(templates: List<TemplateDefinition>, onUse: (TemplateDefinition?) -> Unit) {
     LazyColumn(

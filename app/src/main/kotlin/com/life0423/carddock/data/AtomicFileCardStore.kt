@@ -31,6 +31,10 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
     private val file = AtomicFile(File(context.applicationContext.filesDir, FILE_NAME))
     private val lock = lockFor(file.baseFile)
 
+    /**
+     * 没有正式文件也没有 .bak 时返回 null，表示第一次启动。
+     * 其它读失败或版本不对直接抛出，调用方不得当成空集合。
+     */
     override suspend fun load(): List<CardRecord>? = withContext(Dispatchers.IO) {
         lock.withLock {
             currentCoroutineContext().ensureActive()
@@ -49,6 +53,10 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
         }
     }
 
+    /**
+     * 校验通过后才写。取消或写失败走 failWrite，只丢掉未完成的 .new。
+     * finishWrite 之后只确认字节，失败只抛异常，不回滚已经换上的正式文件。
+     */
     override suspend fun save(cards: List<CardRecord>) = withContext(Dispatchers.IO) {
         lock.withLock {
             currentCoroutineContext().ensureActive()
@@ -87,6 +95,7 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
         }
     }
 
+    /** 空白 id、空标题、重复 id 或规则不合法都拒绝整份集合，避免坏数据进内存后再被写回去。 */
     private fun validate(cards: List<CardRecord>) {
         val ids = mutableSetOf<String>()
         for (card in cards) {
