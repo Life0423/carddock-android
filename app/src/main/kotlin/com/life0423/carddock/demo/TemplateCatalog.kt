@@ -12,7 +12,10 @@ internal const val EXPRESS_TARGET = "parcel-demo-001"
 internal const val DELIVERY_TARGET = "delivery-demo-001"
 internal const val TRAVEL_TARGET = "journey-demo-001"
 
-/** Small, reviewed examples. Each rule reads exactly one stable demonstration object. */
+/**
+ * Small, reviewed examples. Each rule reads exactly one stable demonstration object.
+ * 每条规则都是先核对固定目标，再对每个字段读取并要求非空。字段名与 DemoDeviceGateway 的演示页一致。
+ */
 object TemplateCatalog {
     val templates: List<TemplateDefinition> = listOf(
         TemplateDefinition(

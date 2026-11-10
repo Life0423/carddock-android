@@ -9,6 +9,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.life0423.carddock.ui.CardDockApp
 
+/**
+ * 把应用级控制器接进 Compose。控制器在 Application 里，旋转重建 Activity 不会新开一套会话。
+ * 背景固定是暗色，系统栏用 SystemBarStyle.dark，图标才是浅色。
+ */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

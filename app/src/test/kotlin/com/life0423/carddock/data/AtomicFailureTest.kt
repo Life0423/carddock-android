@@ -176,6 +176,7 @@ class AtomicFailureTest {
         store().save(listOf(old))
         val bytes = base.readBytes()
         val hook = FaultAtomic(base)
+        // 先把 job 交给 cancelOnStart 再 start。这里的 runBlocking 不会在 launch 返回前执行保存；LAZY 只是让启动发生在赋值之后。
         val task = launch(start = CoroutineStart.LAZY) { store(hook).save(emptyList()) }
         hook.cancelOnStart = task
         task.start()

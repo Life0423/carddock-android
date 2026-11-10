@@ -6,7 +6,10 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-/** Named palette values keep presentation decisions out of business code. */
+/**
+ * Named palette values keep presentation decisions out of business code.
+ * 业务层不要直接写色值。界面只引用这里的命名颜色。
+ */
 object DockColors {
     val Background = Color(0xFF08131F)
     val Surface = Color(0xFF122333)
@@ -40,7 +43,10 @@ private val CardDockColorScheme = darkColorScheme(
     error = DockColors.Error,
 )
 
-/** A deliberate dark prototype theme; no device-dependent dynamic colors. */
+/**
+ * A deliberate dark prototype theme; no device-dependent dynamic colors.
+ * 不跟系统动态取色，演示配色不会被壁纸色替换。
+ */
 @Composable
 fun CardDockTheme(content: @Composable () -> Unit) {
     MaterialTheme(

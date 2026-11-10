@@ -8,7 +8,11 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 
-/** Deterministic demonstration adapter. It never reads another app or makes a network request. */
+/**
+ * Deterministic demonstration adapter. It never reads another app or makes a network request.
+ * 延时前把场景抄到局部变量。等待期间切换场景不会改变这次已经开始的观察。
+ * [inspect] 的 targetKey 不参与选页；错目标场景会故意换成另一个对象键，交给引擎拒绝。
+ */
 class DemoDeviceGateway(private val suspendDelayMillis: Long = 1400L) : DeviceGateway {
     init {
         require(suspendDelayMillis >= 0) { "Demonstration delay cannot be negative" }
@@ -23,6 +27,7 @@ class DemoDeviceGateway(private val suspendDelayMillis: Long = 1400L) : DeviceGa
 
     override suspend fun inspect(sourceId: String, targetKey: String): DeviceResponse {
         currentCoroutineContext().ensureActive()
+        // 挂起前抄下场景。delay 返回后不再读字段，同一次观察不会前后不一致。
         val selectedScenario = scenario
         delay(suspendDelayMillis)
         currentCoroutineContext().ensureActive()

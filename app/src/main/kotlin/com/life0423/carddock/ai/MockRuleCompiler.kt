@@ -7,7 +7,11 @@ import com.life0423.carddock.core.port.RuleCompiler
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
-/** Keyword routing for the prototype, not an AI model or an arbitrary rule generator. */
+/**
+ * Keyword routing for the prototype, not an AI model or an arbitrary rule generator.
+ * 只在传入的模板里做关键词分流，不会生成新规则。构造时拷贝列表，之后调用方改原列表不影响匹配。
+ * 先拒绝支付、下单等写操作，再要求恰好命中一种模板。
+ */
 class MockRuleCompiler(templates: List<TemplateDefinition>) : RuleCompiler {
     private val availableTemplates = templates.toList()
 
@@ -19,6 +23,7 @@ class MockRuleCompiler(templates: List<TemplateDefinition>) : RuleCompiler {
             return CompileResult.Unsupported("当前原型只演示信息读取，暂不支持下单、支付或修改数据。")
         }
 
+        // 命中两种及以上就拒绝，避免一条描述悄悄落到其中一个模板。
         val matchingKinds = keywords.filterValues { words -> words.any { matches(request, it) } }.keys
         if (matchingKinds.size > 1) {
             return CompileResult.Unsupported("这段描述包含多个功能，请先选择快递、外卖或出行中的一个。")
@@ -31,6 +36,10 @@ class MockRuleCompiler(templates: List<TemplateDefinition>) : RuleCompiler {
         return CompileResult.Success(template)
     }
 
+    /**
+     * 英文关键词使用正则的词边界，避免 train 命中 training。
+     * 中文关键词直接做子串匹配，以便连续的中文描述能命中；这里不做自然语言分词。
+     */
     private fun matches(request: String, keyword: String): Boolean =
         if (keyword.first() in 'a'..'z') {
             Regex("\\b${Regex.escape(keyword)}\\b").containsMatchIn(request)

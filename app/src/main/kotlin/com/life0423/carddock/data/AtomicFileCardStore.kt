@@ -31,6 +31,10 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
     private val file = AtomicFile(File(context.applicationContext.filesDir, FILE_NAME))
     private val lock = lockFor(file.baseFile)
 
+    /**
+     * 没有正式文件也没有 .bak 时返回 null，表示第一次启动。
+     * 其它读失败或版本不对直接抛出，调用方不得当成空集合。
+     */
     override suspend fun load(): List<CardRecord>? = withContext(Dispatchers.IO) {
         lock.withLock {
             currentCoroutineContext().ensureActive()
@@ -49,6 +53,10 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
         }
     }
 
+    /**
+     * 校验通过后才写。取消或写失败走 failWrite，只丢掉未完成的 .new。
+     * finishWrite 之后只确认字节，失败只抛异常，不回滚已经换上的正式文件。
+     */
     override suspend fun save(cards: List<CardRecord>) = withContext(Dispatchers.IO) {
         lock.withLock {
             currentCoroutineContext().ensureActive()
@@ -87,6 +95,7 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
         }
     }
 
+    /** 空白 id、空标题、重复 id 或规则不合法都拒绝整份集合，避免坏数据进内存后再被写回去。 */
     private fun validate(cards: List<CardRecord>) {
         val ids = mutableSetOf<String>()
         for (card in cards) {
@@ -105,7 +114,11 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
         const val STORAGE_VERSION = 1
         private val locks = ConcurrentHashMap<String, Mutex>()
 
-        /** 先规范化路径，同一文件不会因为 ./ 或符号链接拿到两把锁。 */
+        /**
+         * 先规范化路径，同一文件不会因为 ./ 或父目录别名拿到两把锁。最终文件本身是符号链接不在支持范围：写入会替换链接，锁可能分裂。生产只用自己创建的普通文件。
+         * 固定私有文件的锁随进程保留。路径规范化失败时按绝对路径降级，只串行单次 load 或 save。
+         * 这不是跨进程锁，也不把多个控制器收成一次快照事务。
+         */
         private fun lockFor(base: File): Mutex {
             val key = try {
                 base.canonicalPath

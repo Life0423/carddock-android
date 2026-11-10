@@ -37,7 +37,12 @@ import com.life0423.carddock.core.model.CardRecord
 import com.life0423.carddock.core.model.RunPhase
 import com.life0423.carddock.ui.theme.DockColors
 
-/** The same card component renders fresh, stale, running and interrupted states. */
+/**
+ * The same card component renders fresh, stale, running and interrupted states.
+ * 没有 run 时：无快照为待运行，有快照视为已更新。
+ * 只要有上一份快照，排队、运行、失败、取消、中断和接管都会显示它，并标明不是本次结果。
+ * 移除先确认。确认框只活在这里，取消确认不会碰会话。
+ */
 @Composable
 internal fun FunctionCard(
     card: CardRecord,
@@ -47,6 +52,7 @@ internal fun FunctionCard(
     onDelete: () -> Unit,
 ) {
     val phase = card.run?.phase ?: if (card.snapshot == null) RunPhase.IDLE else RunPhase.SUCCEEDED
+    // 按卡片 id 记住。列表复用到另一张卡时丢掉上一张的删除确认。
     var menuOpen by remember(card.id) { mutableStateOf(false) }
     var confirmDelete by remember(card.id) { mutableStateOf(false) }
 
@@ -129,6 +135,7 @@ private fun CardActions(
     onCancel: () -> Unit,
     onResume: () -> Unit,
 ) {
+    // NEEDS_USER 不算忙碌：设备读取已经返回，要同时给出接管和取消。忙碌时只能取消。
     when {
         phase.isBusy() -> OutlinedButton(onCancel, Modifier.fillMaxWidth().testTag("cancel_$id")) {
             Text("取消运行")

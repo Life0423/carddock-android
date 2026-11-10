@@ -2,11 +2,16 @@ package com.life0423.carddock.core.rule
 
 data class RuleValidationError(val code: String, val message: String)
 
-/** Validates the complete plan before any device access, including references in later steps. */
+/**
+ * Validates the complete plan before any device access, including references in later steps.
+ * 返回 null 表示通过。任一处不满足就拒绝整份规则，引擎不会再访问设备。
+ * 顺序是约束：读取前必须已经核对目标，必填只能引用本规则里更早的输出。
+ */
 object RuleValidator {
     const val SUPPORTED_SCHEMA_VERSION = 1
     const val MAX_STEPS = 32
 
+    /** 通过时返回 null。code 为 UNSUPPORTED_SCHEMA 或 INVALID_RULE，message 给界面。 */
     fun validate(rule: RuleSpec): RuleValidationError? {
         if (rule.schemaVersion != SUPPORTED_SCHEMA_VERSION) {
             return RuleValidationError("UNSUPPORTED_SCHEMA", "当前版本不支持这份规则的格式。")

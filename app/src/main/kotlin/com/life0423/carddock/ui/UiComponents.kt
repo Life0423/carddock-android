@@ -68,6 +68,7 @@ internal fun RunPhase.label(): String = when (this) {
     RunPhase.INTERRUPTED -> "已中断"
 }
 
+/** 只有排队和运行中算忙碌。需要接管时设备协程已结束，界面要给接管和取消，不能只剩进度条。 */
 internal fun RunPhase.isBusy(): Boolean = this == RunPhase.RUNNING || this == RunPhase.QUEUED
 
 @Composable
@@ -117,5 +118,6 @@ internal fun SnapshotFields(fields: List<FieldValue>, modifier: Modifier = Modif
     }
 }
 
+/** 用设备默认时区和简体中文格式显示。同一毫秒在不同时区会显示成不同的钟点。 */
 internal fun formatTimestamp(epochMillis: Long): String =
     SimpleDateFormat("MM月dd日 HH:mm:ss", Locale.SIMPLIFIED_CHINESE).format(Date(epochMillis))
