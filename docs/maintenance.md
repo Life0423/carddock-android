@@ -45,7 +45,7 @@
 
 这个原型已经在仓库 `main` 上，不是还要迁入的外部工程。模块只有 `settings.gradle.kts` 里的 `:app` 和 `:core`。包名根是 `com.life0423.carddock`。`app/build.gradle.kts` 中 `applicationId` 为 `com.life0423.carddock`，debug 增加后缀 `.prototype`，`versionName` 为 `0.1.0-prototype`，`versionCode` 为 1，`minSdk` 为 26，`compileSdk` / `targetSdk` 为 35。
 
-从最新 `main` 拉分支。仓库没有 `scripts/` 目录。验证命令与 `.github/workflows/android.yml` 的 `verify` 任务相同：
+从最新 `main` 拉分支。仓库没有 `scripts/` 目录。验证任务与 `.github/workflows/android.yml` 的 `verify` 相同；工作流在这条命令后额外加上 `--stacktrace`：
 
 ```bash
 ./gradlew :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
@@ -53,7 +53,7 @@
 
 工作流使用 JDK 17，并安装 `platforms;android-35`、`build-tools;34.0.0` 和 `build-tools;35.0.0`。本地把 `JAVA_HOME` 指到 JDK 17，用 `ANDROID_HOME` 或未入库的 `local.properties` 中的 `sdk.dir` 指向 SDK。
 
-提交前确认 diff 里没有 `.gradle/`、`**/build/`、`local.properties`、`*.jks`、`*.keystore`、`keystore.properties`、`signing.properties`、`google-services.json`、`*.apk`、`*.aab`。
+提交前确认 diff 里没有 `.gradle/`、`**/build/`、`local.properties`、`*.jks`、`*.keystore`、`keystore.properties`、`signing.properties`、`google-services.json`、`*.apk`、`*.aab`、`*.hprof`。
 
 ## 代码约定
 

@@ -8,7 +8,7 @@
 ./gradlew :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
-2026-11-10 19:28（北京时间）在本机用 JDK 17、Android SDK Platform 35 跑通上述命令。`:core:test` 46 个，`:app:testDebugUnitTest` 26 个，合计 **72 个测试通过，0 失败，0 跳过**。同一提交的 GitHub Actions run [42805389493](https://github.com/Life0423/carddock-android/actions/runs/42805389493)（2026-11-10 19:13 北京时间完成）里 `verification-reports` 的分类计数与此一致。2026-11-09 记录的 45 个没有计入后来加入的 `FailurePathsTest`、`FixroundBoundaryTest`、`AtomicFailureTest`、`FixroundCancelledCommitTest`。
+2026-11-10 19:30（北京时间）在本机用 JDK 17、Android SDK Platform 35 跑通上述命令。`:core:test` 46 个，`:app:testDebugUnitTest` 26 个，合计 **72 个测试通过，0 失败，0 跳过**。同一提交的 GitHub Actions run [42805389493](https://github.com/Life0423/carddock-android/actions/runs/42805389493)（2026-11-10 19:13 北京时间完成）里 `verification-reports` 的分类计数与此一致。2026-11-09 记录的 45 个没有计入后来加入的 `FailurePathsTest`、`FixroundBoundaryTest`、`AtomicFailureTest`、`FixroundCancelledCommitTest`。
 
 | 测试类 | 测试数 | 结果 |
 | --- | ---: | --- |
