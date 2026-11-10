@@ -27,7 +27,7 @@ import androidx.compose.ui.unit.dp
  * 路径与 AndroidX material-icons-extended 1.7.6 一致，视口 24dp，填充黑色以便 Icon 着色。
  * 固定版本源码：https://dl.google.com/dl/android/maven2/androidx/compose/material/material-icons-extended-android/1.7.6/material-icons-extended-android-1.7.6-sources.jar
  * 各图标位于该 JAR 的 commonMain/androidx/compose/material/icons/rounded/。版权：The Android Open Source Project，Apache License 2.0。
- * 矢量命令和数字保持上游原样。本地收进 DockIcons，用 ImageVector.Builder 加 lazy，代替上游的 Icons.Rounded 扩展属性和 materialIcon 缓存。
+ * 上游由 materialIcon 构造 ImageVector，并由 Icons.Rounded 扩展属性的私有字段缓存；本地改为 DockIcons 中的 ImageVector.Builder 构造与 lazy 缓存，path 命令和数字不变。
  * 内联是为了不依赖 material-icons-extended：这里只用到其中几个图标，不必把整包扩展库放进依赖。
  * 下面的路径数据不再逐个加注释。
  */

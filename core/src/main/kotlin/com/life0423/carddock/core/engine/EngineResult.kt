@@ -20,7 +20,7 @@ sealed interface EngineResult {
     data class Success(val snapshot: CardSnapshot) : EngineResult
     /**
      * [code] 给调用方和测试区分原因。会话不把它写入 RunInfo，RunInfo 也没有这个字段。
-     * [message] 给界面。inspect 抛出的异常会换成固定文案；DeviceResponse.Failed 自带的文案原样传过来。
+     * [message] 给界面。inspect 抛出的异常会换成固定文案。DeviceResponse.Failed 的 message 非空白时原样保留，空白时用固定文案。
      */
     data class Failure(val code: String, val message: String) : EngineResult
     /** 引擎到此返回，不再执行后续步骤。会话结束这次运行并放开通道；之后的取消要另写终态。 */

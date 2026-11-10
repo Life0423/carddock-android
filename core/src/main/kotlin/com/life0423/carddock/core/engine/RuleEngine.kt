@@ -26,7 +26,7 @@ class RuleEngine(
      * 校验并执行只读 [rule]。通过则返回投影后的快照；否则返回失败或接管，不带新快照。
      * [onProgress] 在读设备前，以及每一步完成后调用。回调抛出的异常直接交给调用方，不会收成 DEVICE_ERROR。
      * [CancellationException] 原样抛出。只有 [DeviceGateway.inspect] 抛出的其它异常才变成固定文案的 DEVICE_ERROR。
-     * [DeviceResponse.Failed] 自带的 message 原样放进失败结果。[now] 在成功返回时取值，它抛出的异常同样向外传。
+     * [DeviceResponse.Failed] 的 message 非空白时原样保留，空白时用「未能读取页面，请稍后重试。」。[now] 在成功返回时取值，它抛出的异常同样向外传。
      */
     suspend fun execute(
         rule: RuleSpec,

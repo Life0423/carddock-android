@@ -114,7 +114,11 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
         const val STORAGE_VERSION = 1
         private val locks = ConcurrentHashMap<String, Mutex>()
 
-        /** 先规范化路径，同一文件不会因为 ./ 或符号链接拿到两把锁。 */
+        /**
+         * 先规范化路径，同一文件不会因为 ./ 或符号链接拿到两把锁。
+         * 固定私有文件的锁随进程保留。路径规范化失败时按绝对路径降级，只串行单次 load 或 save。
+         * 这不是跨进程锁，也不把多个控制器收成一次快照事务。
+         */
         private fun lockFor(base: File): Mutex {
             val key = try {
                 base.canonicalPath
