@@ -122,7 +122,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 UI 测试通过 Robolectric 在 JVM 中运行真实 Android/Compose 代码并输出截图到 `app/build/outputs/screenshots/`。这不代替物理手机验收。测试详情和手工检查见 [验证说明](docs/verification.md)。
 
-`.github/workflows/android.yml` 在推送到 `main`、pull request 以及手动触发时，运行与上面相同的 Gradle 验证命令。
+`.github/workflows/android.yml` 在推送到 `main`、pull request 以及手动触发时，运行上面这些 Gradle 任务，并额外加上 `--stacktrace`。
 
 ## 当前边界
 
