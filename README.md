@@ -1,16 +1,26 @@
-# CardDock · 卡坞
+<p align="center">
+  <img src="assets/brand/readme-banner.png" alt="卡坞 CardDock 横幅" width="100%">
+</p>
 
-一个可运行的 Android 功能卡片原型。把需求转成可检查的规则，先试运行、再保存到个人空间，后续刷新直接执行已保存的规则。
+# 卡坞 · CardDock
 
-**当前版本：`0.1.0-prototype`。所有信息来自本地模拟设备；没有接入真实第三方应用、账号或大模型。**
+把散落在各个 App 的功能，重组成属于你自己的卡片空间。
+
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Android](https://img.shields.io/badge/Android-8.0%2B-brightgreen.svg)](https://developer.android.com/about/versions/oreo/android-8.0)
+[![GitHub](https://img.shields.io/badge/GitHub-Life0423%2Fcarddock--android-181717?logo=github)](https://github.com/Life0423/carddock-android)
+
+开源、不上架、不收费。当前版本是 `0.1.0-prototype`：把需求转成可检查的规则，先试运行、再保存到个人空间，后续刷新直接执行已保存的规则。所有信息来自本地模拟设备；没有接入真实第三方应用、账号或大模型。
+
+长远目标是由 Agent 记住你常用的功能和中断的地方，帮你直达功能、接着办完（当前原型尚未实现）。
 
 ## 可以体验什么
 
 - 空间：预置两张待刷新功能卡，显示内容、执行状态和上次成功时间。
 - 模板：取件、配送、出行三种通用示例。
 - 创建：输入需求 → 匹配演示模板 → 试运行 → 核验预览 → 修改名称 → 明确确认保存。
-- 刷新：复用已保存规则，成功后更新快照。失败、取消、目标错配或等待接管时保留上次有效结果。
-- 我的：切换正常读取、需要接管、读取失败、目标错配四种模拟场景。
+- 刷新：复用已保存规则，成功后更新快照。失败、取消、对象不匹配或等待接管时保留上次有效结果。
+- 我的：切换正常获取、需要接管、读取失败、对象不匹配四种模拟场景。
 - 接管：点击完成模拟接管后重新读取并核验；不会直接把旧结果标为成功。
 - 本地保存：卡片和最近一次运行状态保存在应用私有目录；重启后恢复。
 - 移除与重置：均由用户明确触发，界面提供确认。
@@ -48,12 +58,14 @@ app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
+这条命令需要已连接并授权的设备。没有设备时会失败。
+
 代码 namespace 和基础 applicationId 为 `com.life0423.carddock`。调试版本增加 `.prototype` 后缀，实际安装包为 `com.life0423.carddock.prototype`，桌面名称为“卡坞 · 原型”，方便与之后的正式应用共存。
 
 ## 三分钟体验路径
 
-1. 打开空间，点击取件卡的“刷新卡片”，查看演示取件信息及成功时间。
-2. 在“模板”中选择一种模板，点击“使用模板”，试运行后确认保存。
+1. 打开空间，点击“待取快递”的“刷新卡片”，查看演示取件信息及成功时间。
+2. 在“模板”中选择一种模板，点击“试用这个模板”，试运行后确认保存。
 3. 到“我的”把场景切换为“读取失败”，返回空间刷新已有有效结果的卡片：旧内容和旧成功时间应保留，并出现失败状态。
 4. 将场景切换为“需要接管”，刷新后点击“完成模拟接管”：会发起一次新的核验。
 5. 在刷新过程中点击取消，或者在试运行时关闭创建窗口，观察任务停止。
@@ -108,7 +120,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 UI 测试通过 Robolectric 在 JVM 中运行真实 Android/Compose 代码并输出截图到 `app/build/outputs/screenshots/`。这不代替物理手机验收。测试详情和手工检查见 [验证说明](docs/verification.md)。
 
-`.github/workflows/android.yml` 已配置相同验证步骤，适用于迁入仓库后的 PR 检查；工作流尚未在你的 GitHub 仓库运行。
+`.github/workflows/android.yml` 在推送到 `main`、pull request 以及手动触发时，运行上面这些 Gradle 任务，并额外加上 `--stacktrace`。
 
 ## 当前边界
 
@@ -116,4 +128,10 @@ Mock 编译器根据受限关键词匹配三个模板，不是任意自然语言
 
 没有申请无障碍、通知、存储或联网权限。后续若接入真实设备，需要单独实现平台适配、目标识别、用户接管和权限生命周期，并在实机验证。原型的状态与接口可以保留，不能把模拟设备直接称为真实应用接入。
 
-这是独立原型工程，未读取、修改或合并其他对话中的现有仓库和 PR。迁入时先核对现有 Gradle 配置、AGENTS.md 和包结构，按差异合并。
+## 贡献
+
+欢迎提 Issue 与 Pull Request。沟通默认使用中文。请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [AGENTS.md](AGENTS.md)。
+
+## 许可证
+
+[Apache License 2.0](LICENSE)。
