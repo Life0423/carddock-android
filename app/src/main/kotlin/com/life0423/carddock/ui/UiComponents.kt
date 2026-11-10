@@ -10,10 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Inventory2
-import androidx.compose.material.icons.rounded.LocalShipping
-import androidx.compose.material.icons.rounded.Train
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -34,9 +30,9 @@ import java.util.Date
 import java.util.Locale
 
 internal fun TemplateKind.icon(): ImageVector = when (this) {
-    TemplateKind.EXPRESS -> Icons.Rounded.Inventory2
-    TemplateKind.DELIVERY -> Icons.Rounded.LocalShipping
-    TemplateKind.TRAVEL -> Icons.Rounded.Train
+    TemplateKind.EXPRESS -> DockIcons.Inventory2
+    TemplateKind.DELIVERY -> DockIcons.LocalShipping
+    TemplateKind.TRAVEL -> DockIcons.Train
 }
 
 internal fun TemplateKind.accent(): Color = when (this) {

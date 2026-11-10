@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -65,7 +64,7 @@ internal fun FunctionCard(
                 }
                 Column {
                     IconButton(onClick = { menuOpen = true }, modifier = Modifier.testTag("menu_${card.id}")) {
-                        Icon(Icons.Rounded.MoreHoriz, contentDescription = "${card.title}的更多操作", tint = DockColors.Muted)
+                        Icon(DockIcons.MoreHoriz, contentDescription = "${card.title}的更多操作", tint = DockColors.Muted)
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(

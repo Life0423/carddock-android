@@ -8,17 +8,12 @@ import com.life0423.carddock.core.model.RunInfo
 import com.life0423.carddock.core.model.RunPhase
 import com.life0423.carddock.core.model.TemplateDefinition
 import com.life0423.carddock.core.model.TemplateKind
-import com.life0423.carddock.core.port.CardStore
-import com.life0423.carddock.core.port.CompileResult
-import com.life0423.carddock.core.port.DeviceGateway
-import com.life0423.carddock.core.port.DeviceResponse
-import com.life0423.carddock.core.port.DeviceSnapshot
-import com.life0423.carddock.core.port.RuleCompiler
 import com.life0423.carddock.core.rule.RuleSpec
 import com.life0423.carddock.core.rule.RuleStep
-import kotlinx.coroutines.CancellationException
+import com.life0423.carddock.core.testing.FixedCompiler
+import com.life0423.carddock.core.testing.MemoryCardStore
+import com.life0423.carddock.core.testing.ObservedDevice
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -32,7 +27,7 @@ class PrototypeControllerTest {
         val first = fixture()
         first.initialize()
         assertEquals(2, first.state.cards.size)
-        assertNotNull(first.store.saved)
+        assertNotNull(first.store.disk)
         val empty = fixture(emptyList())
         empty.initialize()
         assertTrue(empty.state.cards.isEmpty())
@@ -50,7 +45,7 @@ class PrototypeControllerTest {
             assertEquals(RunPhase.INTERRUPTED, it.run?.phase)
             assertEquals(oldSnapshot, it.snapshot)
         }
-        assertEquals(fixture.state.cards, fixture.store.saved)
+        assertEquals(fixture.state.cards, fixture.store.disk)
     }
 
     @Test fun `refresh failure and takeover preserve last successful snapshot and timestamp`() = runTest {
@@ -190,31 +185,31 @@ class PrototypeControllerTest {
         fixture.initialize()
         fixture.actions.refreshCard("saved")
         runCurrent()
-        fixture.store.failWrites = true
+        fixture.store.failWrite = true
         finishOperations()
         val card = fixture.state.cards.single()
         assertEquals(oldSnapshot, card.snapshot)
         assertEquals(RunPhase.FAILED, card.run?.phase)
-        assertEquals(oldSnapshot, fixture.store.saved!!.single().snapshot)
+        assertEquals(oldSnapshot, fixture.store.disk!!.single().snapshot)
         assertNotNull(fixture.state.notice)
     }
 
     @Test fun `unreadable data is preserved until the user explicitly resets`() = runTest {
         val fixture = fixture()
-        fixture.store.failReads = true
+        fixture.store.failRead = true
         fixture.initialize()
         assertTrue(fixture.state.cards.isEmpty())
-        assertNull(fixture.store.saved)
+        assertNull(fixture.store.disk)
         fixture.actions.openCreator(templates.first())
         fixture.actions.trialDraft()
         finishOperations()
         fixture.actions.saveDraft()
         runCurrent()
-        assertNull(fixture.store.saved)
+        assertNull(fixture.store.disk)
         fixture.actions.resetDemo()
         runCurrent()
         assertEquals(2, fixture.state.cards.size)
-        assertNotNull(fixture.store.saved)
+        assertNotNull(fixture.store.disk)
     }
 
     @Test fun `deleting a running card cannot resurrect it when the read completes`() = runTest {
@@ -226,18 +221,16 @@ class PrototypeControllerTest {
         fixture.actions.deleteCard(id)
         finishOperations()
         assertFalse(fixture.state.cards.any { it.id == id })
-        assertFalse(fixture.store.saved!!.any { it.id == id })
+        assertFalse(fixture.store.disk!!.any { it.id == id })
     }
 
     private fun TestScope.fixture(stored: List<CardRecord>? = null): Fixture {
-        val store = MemoryStore(stored)
-        val device = DelayedDevice()
+        val store = MemoryCardStore(stored)
+        val device = ObservedDevice(templates.associate { it.rule.sourceId to it.rule.targetKey })
         var id = 0
         val controller = PrototypeController(
-            store, object : RuleCompiler {
-                override suspend fun compile(prompt: String) = CompileResult.Success(templates.first())
-            }, RuleEngine(device) { testScheduler.currentTime }, templates, backgroundScope,
-            device::setScenario, now = { testScheduler.currentTime }, newId = { "id-${++id}" },
+            store, FixedCompiler(templates.first()), RuleEngine(device) { testScheduler.currentTime }, templates,
+            backgroundScope, device::setScenario, now = { testScheduler.currentTime }, newId = { "id-${++id}" },
         )
         return Fixture(controller, store, device, this)
     }
@@ -246,8 +239,8 @@ class PrototypeControllerTest {
 
     private data class Fixture(
         val controller: PrototypeController,
-        val store: MemoryStore,
-        val device: DelayedDevice,
+        val store: MemoryCardStore,
+        val device: ObservedDevice,
         val test: TestScope,
     ) {
         val state get() = controller.state.value
@@ -255,51 +248,12 @@ class PrototypeControllerTest {
         suspend fun initialize() { controller.initialize(); test.runCurrent() }
     }
 
-    private class MemoryStore(var saved: List<CardRecord>?) : CardStore {
-        var failWrites = false
-        var failReads = false
-        override suspend fun load(): List<CardRecord>? {
-            check(!failReads)
-            return saved
-        }
-        override suspend fun save(cards: List<CardRecord>) {
-            check(!failWrites)
-            saved = cards
-        }
-    }
-
-    private class DelayedDevice : DeviceGateway {
-        private var scenario = DemoScenario.NORMAL
-        var calls = 0
-        var concurrentCalls = 0
-        var maxConcurrentCalls = 0
-        var cancelledCalls = 0
-        fun setScenario(value: DemoScenario) { scenario = value }
-        override suspend fun inspect(sourceId: String, targetKey: String): DeviceResponse {
-            calls += 1
-            concurrentCalls += 1
-            maxConcurrentCalls = maxOf(maxConcurrentCalls, concurrentCalls)
-            val selected = scenario
-            try {
-                delay(1_000)
-                return when (selected) {
-                    DemoScenario.NORMAL -> DeviceResponse.Ready(DeviceSnapshot(sourceId, targetKey, mapOf("status" to "已更新")))
-                    DemoScenario.NEEDS_USER -> DeviceResponse.NeedsUser("演示接管")
-                    DemoScenario.READ_FAILURE -> DeviceResponse.Failed("演示失败")
-                    DemoScenario.WRONG_TARGET -> DeviceResponse.Ready(DeviceSnapshot(sourceId, "wrong", mapOf("status" to "不应显示")))
-                }
-            } catch (cancelled: CancellationException) {
-                cancelledCalls += 1
-                throw cancelled
-            } finally { concurrentCalls -= 1 }
-        }
-    }
-
     private companion object {
         val oldSnapshot = CardSnapshot(listOf(FieldValue("status", "状态", "旧结果")), 100)
         val templates = listOf(TemplateKind.EXPRESS, TemplateKind.DELIVERY).map { kind ->
+            val sourceId = "demo.${kind.name}"
             TemplateDefinition(kind.name, "示例${kind.name}", "演示", kind, "示例需求${kind.name}",
-                RuleSpec(id = kind.name, sourceId = "demo", targetKey = kind.name, steps = listOf(
+                RuleSpec(id = kind.name, sourceId = sourceId, targetKey = kind.name, steps = listOf(
                     RuleStep.AssertTarget(kind.name), RuleStep.ReadField("status", "status", "状态"),
                     RuleStep.RequireField("status"),
                 )))

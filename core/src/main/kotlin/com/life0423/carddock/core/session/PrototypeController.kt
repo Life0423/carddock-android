@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.serialization.json.Json
 import java.util.UUID
 
 /**
@@ -28,7 +27,6 @@ class PrototypeController(
     private val templates: List<TemplateDefinition>,
     private val scope: CoroutineScope,
     private val setDeviceScenario: (DemoScenario) -> Unit = {},
-    json: Json = Json { prettyPrint = true },
     now: () -> Long = System::currentTimeMillis,
     newId: () -> String = { UUID.randomUUID().toString() },
 ) {
@@ -44,7 +42,7 @@ class PrototypeController(
         liveJob = runs::hasLiveJob
     }
 
-    private val creator = CreationController(compiler, engine, cards, lane, scope, json, now, newId, ::notify)
+    private val creator = CreationController(compiler, engine, cards, lane, scope, now, newId, ::notify)
     private var initialized = false
     private var resetting = false
 

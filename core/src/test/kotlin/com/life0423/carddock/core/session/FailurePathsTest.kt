@@ -8,14 +8,13 @@ import com.life0423.carddock.core.model.RunInfo
 import com.life0423.carddock.core.model.RunPhase
 import com.life0423.carddock.core.model.TemplateDefinition
 import com.life0423.carddock.core.model.TemplateKind
-import com.life0423.carddock.core.port.CardStore
-import com.life0423.carddock.core.port.CompileResult
 import com.life0423.carddock.core.port.DeviceGateway
 import com.life0423.carddock.core.port.DeviceResponse
 import com.life0423.carddock.core.port.DeviceSnapshot
-import com.life0423.carddock.core.port.RuleCompiler
 import com.life0423.carddock.core.rule.RuleSpec
 import com.life0423.carddock.core.rule.RuleStep
+import com.life0423.carddock.core.testing.FixedCompiler
+import com.life0423.carddock.core.testing.MemoryCardStore
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -55,29 +54,9 @@ class FailurePathsTest {
     private val seed = old.copy(id = "seed", title = "种子卡", snapshot = null)
     private val template = TemplateDefinition("t", "种子卡", "演示", TemplateKind.EXPRESS, "快递", rule)
 
-    /** 能区分提交前失败和提交后失败的内存存储。提交后失败表示磁盘已换成新集合，随后才抛错。 */
-    private class FaultStore(var disk: List<CardRecord>?) : CardStore {
-        var failRead = false
-        var failWrite = false
-        var failAfterCommit = false
-        var writes = 0
-
-        override suspend fun load(): List<CardRecord>? {
-            if (failRead) throw IOException("injected read failure")
-            return disk
-        }
-
-        override suspend fun save(cards: List<CardRecord>) {
-            writes += 1
-            if (failWrite) throw IOException("injected precommit write failure")
-            disk = cards.toList()
-            if (failAfterCommit) throw IOException("injected postcommit readback failure")
-        }
-    }
-
     @Test
     fun readFailureDoesNotOverwriteDiskOrAcceptUpdates() = runTest {
-        val store = FaultStore(listOf(old))
+        val store = MemoryCardStore(listOf(old))
         store.failRead = true
         val collection = collection(store)
         collection.initialize(listOf(seed))
@@ -89,7 +68,7 @@ class FailurePathsTest {
 
     @Test
     fun readSuccessWithoutRecoveryDoesNotWrite() = runTest {
-        val store = FaultStore(listOf(old))
+        val store = MemoryCardStore(listOf(old))
         store.failWrite = true
         val collection = collection(store)
         collection.initialize(listOf(seed))
@@ -100,7 +79,7 @@ class FailurePathsTest {
     @Test
     fun recoveryWriteFailureKeepsTheLoadedCardsAndCanBeRetried() = runTest {
         val active = old.copy(run = RunInfo("old-run", RunPhase.RUNNING))
-        val store = FaultStore(listOf(active))
+        val store = MemoryCardStore(listOf(active))
         store.failWrite = true
         val notices = mutableListOf<String>()
         val collection = CardCollection(store, { notices += it }, { 100 })
@@ -121,11 +100,11 @@ class FailurePathsTest {
 
     @Test
     fun controllerDoesNotReplaceUserCardsWhenRecoveryWriteFails() = runTest {
-        val store = FaultStore(listOf(old.copy(run = RunInfo("old-run", RunPhase.RUNNING))))
+        val store = MemoryCardStore(listOf(old.copy(run = RunInfo("old-run", RunPhase.RUNNING))))
         store.failWrite = true
         val controller = PrototypeController(
             store,
-            compiler(),
+            FixedCompiler(template),
             RuleEngine(object : DeviceGateway {
                 override suspend fun inspect(sourceId: String, targetKey: String) = error("not called")
             }),
@@ -141,7 +120,7 @@ class FailurePathsTest {
 
     @Test
     fun precommitFailureKeepsDiskAndMemoryTogether() = runTest {
-        val store = FaultStore(listOf(old))
+        val store = MemoryCardStore(listOf(old))
         val collection = collection(store)
         collection.initialize(listOf(seed))
         store.failWrite = true
@@ -152,7 +131,7 @@ class FailurePathsTest {
 
     @Test
     fun postcommitFailurePublishesTheCommittedCards() = runTest {
-        val store = FaultStore(listOf(old))
+        val store = MemoryCardStore(listOf(old))
         val collection = collection(store)
         collection.initialize(listOf(seed))
         store.failAfterCommit = true
@@ -166,7 +145,7 @@ class FailurePathsTest {
 
     @Test
     fun cancellationWriteFailureLeavesARecognizableTerminalPhase() = runTest {
-        val store = FaultStore(listOf(old))
+        val store = MemoryCardStore(listOf(old))
         val collection = collection(store)
         collection.initialize(listOf(seed))
         val runs = RunCoordinator(
@@ -198,7 +177,7 @@ class FailurePathsTest {
 
     @Test
     fun queuedCancellationWriteFailureDoesNotStayQueued() = runTest {
-        val store = FaultStore(listOf(old))
+        val store = MemoryCardStore(listOf(old))
         val collection = collection(store)
         collection.initialize(listOf(seed))
         val runs = RunCoordinator(
@@ -223,7 +202,7 @@ class FailurePathsTest {
 
     @Test
     fun exceptionCleanupWriteFailureDoesNotStayRunning() = runTest {
-        val store = FaultStore(listOf(old))
+        val store = MemoryCardStore(listOf(old))
         val collection = collection(store)
         collection.initialize(listOf(seed))
         var clockFails = false
@@ -244,7 +223,7 @@ class FailurePathsTest {
 
     @Test
     fun normalResultWriteFailureKeepsThePreviousSnapshot() = runTest {
-        val store = FaultStore(listOf(old))
+        val store = MemoryCardStore(listOf(old))
         val collection = collection(store)
         collection.initialize(listOf(seed))
         val runs = RunCoordinator(
@@ -268,7 +247,7 @@ class FailurePathsTest {
 
     @Test
     fun cancellationWithWritableStoreEndsCancelled() = runTest {
-        val store = FaultStore(listOf(old))
+        val store = MemoryCardStore(listOf(old))
         val collection = collection(store)
         collection.initialize(listOf(seed))
         val runs = RunCoordinator(
@@ -290,7 +269,7 @@ class FailurePathsTest {
 
     @Test
     fun unchangedUpdateReturnsFalseWithoutWriting() = runTest {
-        val store = FaultStore(listOf(old))
+        val store = MemoryCardStore(listOf(old))
         val collection = collection(store)
         collection.initialize(listOf(seed))
         assertFalse(collection.update { it })
@@ -301,14 +280,10 @@ class FailurePathsTest {
     fun cancellationDuringCommitStillPublishesDiskAndMemoryTogether() = runTest {
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
-        var disk = listOf(old)
-        val store = object : CardStore {
-            override suspend fun load() = disk
-            override suspend fun save(cards: List<CardRecord>) {
-                entered.complete(Unit)
-                release.await()
-                disk = cards
-            }
+        val store = MemoryCardStore(listOf(old))
+        store.beforeSave = {
+            entered.complete(Unit)
+            release.await()
         }
         val collection = CardCollection(store, {}, { 100 })
         collection.initialize(listOf(seed))
@@ -318,14 +293,14 @@ class FailurePathsTest {
         task.cancel()
         release.complete(Unit)
         runCurrent()
-        assertEquals(2, disk.size)
-        assertEquals(disk, collection.state.value.cards)
+        assertEquals(2, store.disk!!.size)
+        assertEquals(store.disk, collection.state.value.cards)
         assertTrue(task.isCancelled)
     }
 
     @Test
     fun exceptionWithWritableCleanupEndsFailed() = runTest {
-        val store = FaultStore(listOf(old))
+        val store = MemoryCardStore(listOf(old))
         val collection = collection(store)
         collection.initialize(listOf(seed))
         val engine = RuleEngine(object : DeviceGateway {
@@ -338,9 +313,5 @@ class FailurePathsTest {
         assertEquals(RunPhase.FAILED, collection.find(old.id)!!.run!!.phase)
     }
 
-    private fun TestScope.collection(store: FaultStore) = CardCollection(store, {}, { 100 })
-
-    private fun compiler() = object : RuleCompiler {
-        override suspend fun compile(prompt: String) = CompileResult.Success(template)
-    }
+    private fun TestScope.collection(store: MemoryCardStore) = CardCollection(store, {}, { 100 })
 }

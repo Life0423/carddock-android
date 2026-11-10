@@ -6,15 +6,13 @@ import com.life0423.carddock.core.model.RunInfo
 import com.life0423.carddock.core.model.RunPhase
 import com.life0423.carddock.core.model.TemplateDefinition
 import com.life0423.carddock.core.model.TemplateKind
-import com.life0423.carddock.core.port.CardStore
-import com.life0423.carddock.core.port.CompileResult
 import com.life0423.carddock.core.port.DeviceGateway
 import com.life0423.carddock.core.port.DeviceResponse
 import com.life0423.carddock.core.port.DeviceSnapshot
-import com.life0423.carddock.core.port.RuleCompiler
 import com.life0423.carddock.core.rule.RuleSpec
 import com.life0423.carddock.core.rule.RuleStep
-import java.io.IOException
+import com.life0423.carddock.core.testing.FixedCompiler
+import com.life0423.carddock.core.testing.MemoryCardStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.currentCoroutineContext
@@ -50,24 +48,16 @@ class FixroundBoundaryTest {
     fun cancelledCallerWithPostcommitExceptionMustNotSkipReconciliation() = runTest {
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
-        var disk = listOf(old)
         var inject = true
-        val store = object : CardStore {
-            override suspend fun load(): List<CardRecord> {
-                currentCoroutineContext().ensureActive()
-                return disk
-            }
-
-            override suspend fun save(cards: List<CardRecord>) {
-                if (inject) {
-                    entered.complete(Unit)
-                    release.await()
-                    disk = cards
-                    throw IOException("postcommit failure")
-                }
-                disk = cards
+        val store = MemoryCardStore(listOf(old))
+        store.beforeLoad = { currentCoroutineContext().ensureActive() }
+        store.beforeSave = {
+            if (inject) {
+                entered.complete(Unit)
+                release.await()
             }
         }
+        store.failAfterCommit = true
         val collection = CardCollection(store, {}, { 100 })
         collection.initialize(emptyList())
         val task = launch { collection.update { it + extra } }
@@ -77,19 +67,15 @@ class FixroundBoundaryTest {
         release.complete(Unit)
         runCurrent()
         inject = false
+        store.failAfterCommit = false
         collection.update { list -> list.map { card -> card.copy(title = "下一次写入") } }
-        assertEquals("已提交新卡必须保留，或应暂停旧内存继续写入", listOf("user", "new"), disk.map { it.id })
+        assertEquals("已提交新卡必须保留，或应暂停旧内存继续写入", listOf("user", "new"), store.disk!!.map { it.id })
     }
 
     @Test
     fun retryAfterRecoveryWriteFailureMustNotReintroduceOrphanRunningPhase() = runTest {
-        var disk = listOf(old.copy(run = RunInfo("before-process-death", RunPhase.RUNNING)))
-        val store = object : CardStore {
-            override suspend fun load() = disk
-            override suspend fun save(cards: List<CardRecord>) {
-                throw IOException("disk remains unwritable")
-            }
-        }
+        val store = MemoryCardStore(listOf(old.copy(run = RunInfo("before-process-death", RunPhase.RUNNING))))
+        store.failWrite = true
         val collection = CardCollection(store, {}, { 100 })
         collection.initialize(emptyList())
         assertEquals(RunPhase.INTERRUPTED, collection.find(old.id)!!.run!!.phase)
@@ -121,13 +107,8 @@ class FixroundBoundaryTest {
 
     @Test
     fun failedUpdateAfterRecoveryWriteFailureMustNotPublishDiskRunningWithoutJob() = runTest {
-        var disk = listOf(old.copy(run = RunInfo("before-process-death", RunPhase.RUNNING)))
-        val store = object : CardStore {
-            override suspend fun load() = disk
-            override suspend fun save(cards: List<CardRecord>) {
-                throw IOException("still unwritable")
-            }
-        }
+        val store = MemoryCardStore(listOf(old.copy(run = RunInfo("before-process-death", RunPhase.RUNNING))))
+        store.failWrite = true
         val collection = CardCollection(store, {}, { 100 })
         collection.initialize(emptyList())
         assertEquals(RunPhase.INTERRUPTED, collection.find(old.id)!!.run!!.phase)
@@ -142,19 +123,12 @@ class FixroundBoundaryTest {
 
     @Test
     fun deleteAfterRecoveryWriteFailureMustNotLeaveOrphanRunning() = runTest {
-        var disk = listOf(old.copy(run = RunInfo("before-process-death", RunPhase.RUNNING)))
-        val store = object : CardStore {
-            override suspend fun load() = disk
-            override suspend fun save(cards: List<CardRecord>) {
-                throw IOException("unwritable")
-            }
-        }
+        val store = MemoryCardStore(listOf(old.copy(run = RunInfo("before-process-death", RunPhase.RUNNING))))
+        store.failWrite = true
         val template = TemplateDefinition("t", "模板", "演示", TemplateKind.EXPRESS, "快递", rule)
         val controller = PrototypeController(
             store,
-            object : RuleCompiler {
-                override suspend fun compile(prompt: String) = CompileResult.Success(template)
-            },
+            FixedCompiler(template),
             RuleEngine(object : DeviceGateway {
                 override suspend fun inspect(sourceId: String, targetKey: String) =
                     DeviceResponse.Ready(DeviceSnapshot("source", "fixed", mapOf("status" to "ok")))

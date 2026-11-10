@@ -13,7 +13,7 @@
 1. 在 `app/src/main/kotlin/com/life0423/carddock/demo/TemplateCatalog.kt` 的 `TemplateCatalog` 中调整规则和字段标签。
 2. 在 `app/src/main/kotlin/com/life0423/carddock/demo/DemoDeviceGateway.kt` 中调整对应固定对象的字段。场景是 `com.life0423.carddock.core.session.DemoScenario`：`NORMAL`、`NEEDS_USER`、`READ_FAILURE`、`WRONG_TARGET`。
 3. 在 `app/src/main/kotlin/com/life0423/carddock/ai/MockRuleCompiler.kt` 中维护受支持的关键词。
-4. 更新该类场景的测试，确认字段缺失、目标错配会失败。
+4. 更新该类场景的测试，确认字段缺失、对象不匹配会失败。
 
 模板中 `sourceId` 和 `targetKey` 必须对应实际模拟对象。设备响应返回自身观察到的目标，不能原样回显请求的目标来绕过核验。
 
