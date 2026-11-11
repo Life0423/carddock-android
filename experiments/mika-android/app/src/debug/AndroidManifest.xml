@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <queries>
+        <package android:name="com.cainiao.wireless" />
+        <package android:name="com.sankuai.meituan" />
+        <package android:name="com.jingdong.app.mall" />
+        <package android:name="com.xunmeng.pinduoduo" />
+    </queries>
+    <application>
+        <!-- 采样可能包含当前页面正文，仅允许持有 DUMP 权限的调试端触发。 -->
+        <receiver android:name="com.wangzan101.mika.experiment.PageProbeReceiver"
+            android:exported="true" android:permission="android.permission.DUMP" />
+        <activity android:name="com.wangzan101.mika.workspace.WorkspaceActivity"
+            android:exported="true" android:launchMode="singleTask"
+            android:label="功能重组器" android:theme="@style/Theme.Mika">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- Independent debug entry: usable before model onboarding. -->
+        <activity android:name="com.wangzan101.mika.experiment.CainiaoExperimentActivity"
+            android:exported="true" android:launchMode="singleTask"
+            android:label="菜鸟规则实验" android:theme="@style/Theme.Mika">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

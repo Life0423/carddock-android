@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "ruleId": "cainiao-pickup-empty",
+  "version": 1,
+  "target": {
+    "packageName": "com.cainiao.wireless",
+    "testedAppVersion": "8.11.1105"
+  },
+  "steps": [
+    {
+      "action": "LAUNCH",
+      "activity": "com.cainiao.wireless.homepage.view.activity.HomePageActivity"
+    },
+    {
+      "action": "WAIT_PAGE",
+      "requiredTexts": ["首页", "取包裹"],
+      "timeoutMs": 5000
+    },
+    {
+      "action": "CLICK_NODE",
+      "selector": {"text": "取包裹"},
+      "timeoutMs": 5000
+    },
+    {
+      "action": "VERIFY_EMPTY",
+      "title": "取包裹",
+      "emptyText": "暂无待取包裹",
+      "timeoutMs": 8000
+    }
+  ]
+}

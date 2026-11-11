@@ -10,7 +10,9 @@
 [![Android](https://img.shields.io/badge/Android-8.0%2B-brightgreen.svg)](https://developer.android.com/about/versions/oreo/android-8.0)
 [![GitHub](https://img.shields.io/badge/GitHub-Life0423%2Fcarddock--android-181717?logo=github)](https://github.com/Life0423/carddock-android)
 
-开源、不上架、不收费。当前版本是 `0.1.0-prototype`：把需求转成可检查的规则，先试运行、再保存到个人空间，后续刷新直接执行已保存的规则。所有信息来自本地模拟设备；没有接入真实第三方应用、账号或大模型。
+开源、不上架、不收费。根目录的 `0.1.0-prototype` 使用本地模拟设备。它把需求转成可检查的规则，先试运行、再保存到个人空间，后续刷新直接执行已保存的规则。
+
+`dev` 分支在独立目录中提供基于 Mika 的真机原型，包含菜鸟空状态卡片和只读节点采样。构建与实测范围见[真机原型说明](experiments/README.md)。
 
 长远目标是由 Agent 记住你常用的功能和中断的地方，帮你直达功能、接着办完（当前原型尚未实现）。
 
