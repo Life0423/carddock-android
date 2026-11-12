@@ -71,7 +71,7 @@ internal class CainiaoExperimentViewModel(application: Application) : AndroidVie
         candidate = null
         mutableState.value = state.value.copy(draft = raw, canConfirm = false, candidateReady = false, ruleId = "", ruleVersion = 0)
         try {
-            val loaded = ValidatedRule.parse(raw)
+            val loaded = ValidatedRule.parse(raw, cainiaoOnly = true)
             candidate = loaded
             val rule = loaded.template
             val summary = "${rule.ruleId} v${rule.version}\n${rule.target.packageName} · 已测试 ${rule.target.testedAppVersion}\n" +
@@ -80,6 +80,7 @@ internal class CainiaoExperimentViewModel(application: Application) : AndroidVie
                     is RuleStep.WaitPage -> "等待 ${step.requiredTexts.joinToString("、")}"
                     is RuleStep.ClickNode -> "点击唯一节点 ${step.selector.text}"
                     is RuleStep.VerifyEmpty -> "核验 ${step.title} / ${step.emptyText}"
+                    else -> error("菜鸟规则只接受 v1 步骤")
                 } }.joinToString("\n")
             mutableState.value = state.value.copy(summary = summary, candidateReady = true, ruleId = rule.ruleId, ruleVersion = rule.version,
                 savedRule = if (savedFile.exists()) "本地已有已验证规则（执行时重新加载）" else "")
@@ -133,7 +134,7 @@ internal class CainiaoExperimentViewModel(application: Application) : AndroidVie
         if (state.value.running) return
         if (!savedFile.exists()) { control("NO_SAVED_RULE", "尚无已验证规则。请先试运行并确认保存。"); return }
         val saved = try {
-            ValidatedRule.parse(savedFile.readText())
+            ValidatedRule.parse(savedFile.readText(), cainiaoOnly = true)
         } catch (e: Exception) {
             control("SAVED_RULE_INVALID", "已保存规则无法加载：${e.message}")
             return

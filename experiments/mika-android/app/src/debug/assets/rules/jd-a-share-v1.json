@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 2,
+  "ruleId": "jd-a-share",
+  "version": 1,
+  "target": {"packageName": "com.jingdong.app.mall", "testedAppVersion": "16.1.50"},
+  "steps": [{"action": "VERIFY_JD_SHARE"}]
+}

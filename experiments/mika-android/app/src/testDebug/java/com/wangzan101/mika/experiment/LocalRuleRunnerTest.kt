@@ -24,13 +24,17 @@ class LocalRuleRunnerTest {
         var reject = false
         var extraEmptyText = ""
         var selected: RuleSelector? = null
+        var homeLabels = setOf("首页", "取包裹")
+        var homeIconSelected = false
         override fun installedVersion(packageName: String) = version
         override fun launch(target: RuleTarget, activity: String) { launchCount++ }
-        override fun read(): RulePage = RulePage(packageName, when {
+        override fun openMeituanOrder(order: MeituanOrderTarget) { launchCount++ }
+        override suspend fun retryMeituanOrderFromHome(order: MeituanOrderTarget) = error("Unexpected retry")
+        override fun read(detailTarget: RuleTarget?): RulePage = RulePage(packageName, when {
             auth -> setOf("登录", "请输入手机号")
             didClick -> setOf("取包裹", "暂无待取包裹", extraEmptyText)
-            else -> setOf("首页", "取包裹")
-        }, false, 10)
+            else -> homeLabels
+        }, false, 10, cainiaoHomeSelected = !didClick && homeIconSelected)
         override fun click(selector: RuleSelector): RuleClick {
             clickCount++
             selected = selector
@@ -58,6 +62,32 @@ class LocalRuleRunnerTest {
         val phone = Phone().apply { version = "different" }
         assertEquals("APP_VERSION_MISMATCH", execute(phone).outcome)
         assertEquals(0, phone.launchCount)
+    }
+    @Test fun selectedHomeIconStillRequiresPickupEntry() = runTest {
+        val phone = Phone().apply {
+            homeLabels = setOf("取包裹")
+            homeIconSelected = true
+        }
+        assertEquals("EMPTY_CONFIRMED", execute(phone).outcome)
+        val missingPickup = Phone().apply {
+            homeLabels = emptySet()
+            homeIconSelected = true
+        }
+        val failure = runCatching { execute(missingPickup) }.exceptionOrNull()
+        assertTrue(failure is TimeoutCancellationException)
+        assertEquals(0, missingPickup.clickCount)
+    }
+    @Test fun vivoMeituanJumpPromptReturnsHandoffWithoutClicking() = runTest {
+        val phone = Phone().apply {
+            version = MEITUAN_VERSION
+            packageName = "com.vivo.appfilter"
+        }
+        val rule = ValidatedRule.parse(File("src/debug/assets/rules/meituan-order-v1.json").readText())
+        val result = LocalRuleRunner(phone).execute(rule, { _, _ -> }, {}, {},
+            MeituanOrderTarget("1234567890123456789", "1234567890123456"))
+        assertEquals("NEED_HANDOFF", result.outcome)
+        assertEquals(1, phone.launchCount)
+        assertEquals(0, phone.clickCount)
     }
     @Test fun missingAppStopsBeforeLaunch() = runTest {
         val phone = Phone().apply { version = null }

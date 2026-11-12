@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 2,
+  "ruleId": "meituan-history-order",
+  "version": 1,
+  "target": {
+    "packageName": "com.sankuai.meituan",
+    "testedAppVersion": "12.68.402"
+  },
+  "steps": [
+    {"action": "OPEN_MEITUAN_ORDER"},
+    {"action": "VERIFY_MEITUAN_ORDER", "timeoutMs": 10000}
+  ]
+}

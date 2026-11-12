@@ -21,7 +21,7 @@ internal data class ProbeNode(
     val scrollable: Boolean, val editable: Boolean, val password: Boolean,
 )
 
-/** 在调试版中读取指定应用的当前前台窗口，保留节点层级供本机分析。 */
+/** 调试采样先核对授权包名和当前窗口，再只读记录节点。 */
 class PageProbeReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val expected = intent.getStringExtra("expectedPackage") ?: return
@@ -37,22 +37,26 @@ class PageProbeReceiver : BroadcastReceiver() {
             File(dir, "status.json").writeText("""{"outcome":"REFUSED","expectedPackage":"$expected","actualPackage":${actual?.let { ruleJson.encodeToString(it) } ?: "null"}}""")
             return
         }
-        val nodes = mutableListOf<ProbeNode>()
-        fun visit(node: AccessibilityNodeInfo, parent: Int) {
-            val index = nodes.size
-            nodes += ProbeNode(index, parent, node.text?.toString()?.takeUnless { node.isPassword },
-                node.contentDescription?.toString()?.takeUnless { node.isPassword }, node.viewIdResourceName,
-                node.className?.toString(), Rect().also(node::getBoundsInScreen).flattenToString(),
-                node.isVisibleToUser, node.isClickable, node.isScrollable, node.isEditable, node.isPassword)
-            for (i in 0 until node.childCount) node.getChild(i)?.let { visit(it, index) }
-        }
-        visit(root!!, -1)
         val version = context.packageManager.getPackageInfo(expected, 0).versionName.orEmpty()
-        val result = ProbeSnapshot(System.currentTimeMillis(), expected, version, nodes)
+        val result = root!!.probeSnapshot(expected, version)
         File(dir, "$sample.json").writeText(ruleJson.encodeToString(result))
-        File(dir, "status.json").writeText("""{"outcome":"CAPTURED","sampleId":"$sample","packageName":"$expected","nodeCount":${nodes.size}}""")
+        File(dir, "status.json").writeText("""{"outcome":"CAPTURED","sampleId":"$sample","packageName":"$expected","nodeCount":${result.nodes.size}}""")
     }
 }
 
 @Serializable
 internal data class ProbeSnapshot(val capturedAt: Long, val packageName: String, val appVersion: String, val nodes: List<ProbeNode>)
+
+internal fun AccessibilityNodeInfo.probeSnapshot(packageName: String, version: String): ProbeSnapshot {
+    val nodes = mutableListOf<ProbeNode>()
+    fun visit(node: AccessibilityNodeInfo, parent: Int) {
+        val index = nodes.size
+        nodes += ProbeNode(index, parent, node.text?.toString()?.takeUnless { node.isPassword },
+            node.contentDescription?.toString()?.takeUnless { node.isPassword }, node.viewIdResourceName,
+            node.className?.toString(), Rect().also(node::getBoundsInScreen).flattenToString(),
+            node.isVisibleToUser, node.isClickable, node.isScrollable, node.isEditable, node.isPassword)
+        for (i in 0 until node.childCount) node.getChild(i)?.let { visit(it, index) }
+    }
+    visit(this, -1)
+    return ProbeSnapshot(System.currentTimeMillis(), packageName, version, nodes)
+}

@@ -1,6 +1,7 @@
 package com.wangzan101.mika.experiment
 
 import com.wangzan101.mika.workspace.*
+import java.io.File
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -29,6 +30,22 @@ class WorkspaceContractTest {
         assertEquals("页面实际空状态", next.lastValidText)
         assertEquals(200L, next.lastSuccessAt)
         assertEquals(CardStatus.FRESH_VALID, next.status)
+    }
+    @Test fun jdWrongIdentityPreservesStructuredSnapshot() {
+        val jd = old.copy(snapshotJson = "{\"sku\":\"$JD_A_SKU\"}")
+        val failed = jd.afterAttempt("IDENTITY_MISMATCH", "规格不符", "wrong", 200, "wrong")
+        assertEquals(jd.lastSuccessAt, failed.lastSuccessAt)
+        assertEquals(jd.snapshotJson, failed.snapshotJson)
+        assertEquals(CardStatus.STALE_CACHED, failed.status)
+    }
+    @Test fun modelCandidateUsesFrozenCainiaoActionsAndSelectors() {
+        val json = File("src/debug/assets/rules/cainiao-empty-v1.json").readText()
+            .replace("cainiao-pickup-empty", CAINIAO_MODEL_RULE)
+        val expected = ValidatedRule.parse(json).template
+        assertNotNull(validateCainiaoModelCandidate(json, expected))
+        assertNull(validateCainiaoModelCandidate(json.replace("暂无待取包裹", "首页"), expected))
+        assertNull(validateCainiaoModelCandidate(json.replace("取包裹", "寄包裹"), expected))
+        assertNull(validateCainiaoModelCandidate("{}", expected))
     }
     @Test fun genericTimeoutDoesNotInventRuleDamage() {
         assertEquals(CardStatus.STALE_CACHED, old.afterAttempt("TIMEOUT", "超时", "", 200).status)
