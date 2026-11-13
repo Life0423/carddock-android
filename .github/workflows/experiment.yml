@@ -1,0 +1,35 @@
+name: CardDock experiment checks
+on:
+  pull_request:
+    paths: ['experiments/**', '.github/workflows/experiment.yml']
+  push:
+    branches: [main]
+    paths: ['experiments/**', '.github/workflows/experiment.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: experiments/mika-android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+      - run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+      - name: Build debug packages and test CardDock features
+        run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest -PdevInstall --tests 'com.wangzan101.mika.experiment.*' --tests 'com.wangzan101.mika.ui.LicensesTest' --stacktrace
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: experiment-test-reports
+          path: experiments/mika-android/app/build/reports/tests/
