@@ -81,7 +81,7 @@ internal class CreationController(
         val token = generation
         mutableDraft.value = current.copy(
             phase = RunPhase.QUEUED, preview = null, template = null,
-            message = "正在匹配演示模板…",
+            message = "正在匹配模板…",
         )
         work = scope.launch {
             try {
@@ -99,7 +99,7 @@ internal class CreationController(
                         lane.withLock {
                             // 排队等锁期间可能已被关闭。拿到锁后再检查，避免把取消写成一次读取。
                             ensureActive()
-                            edit(token) { it.copy(phase = RunPhase.RUNNING, message = "正在读取模拟设备…") }
+                            edit(token) { it.copy(phase = RunPhase.RUNNING, message = "正在读取设备…") }
                             val result = engine.execute(compiled.template.rule) { progress ->
                                 edit(token) { it.copy(message = progress.message) }
                             }

@@ -102,6 +102,6 @@ class RuleEngine(
             currentCoroutineContext().ensureActive()
         }
 
-        return EngineResult.Success(CardSnapshot(fields = values.values.toList(), fetchedAt = now()))
+        return EngineResult.Success(CardSnapshot(fields = values.values.toList(), fetchedAt = now(), sourceLabel = snapshot.sourceLabel))
     }
 }

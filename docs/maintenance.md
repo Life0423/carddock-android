@@ -27,7 +27,7 @@
 
 `DeviceGateway.inspect` 返回 `DeviceResponse` 的 `Ready`、`NeedsUser` 或 `Failed`，定义在 `core/src/main/kotlin/com/life0423/carddock/core/port/DeviceGateway.kt`。`DeviceSnapshot` 必须带上观察到的 `sourceId`、`targetKey` 和 `fields`；无法可靠识别目标时不要返回 `Ready`。
 
-当前适配器是 `app/src/main/kotlin/com/life0423/carddock/demo/DemoDeviceGateway.kt`。真实平台适配器放在 `app` 模块的独立平台包中，在实际接入时创建；不要放入 `demo` 或把 Android 类型引入 `core`。真正涉及权限、无障碍服务和页面交互时才增加相应组件，并保留中断、取消、错误对象与失败不覆盖旧结果的测试。
+演示适配器是 `app/src/main/kotlin/com/life0423/carddock/demo/DemoDeviceGateway.kt`。真机适配器为 `platform/CainiaoDeviceGateway.kt`，在 AppContainer 按 sourceId 路由；模拟场景切换不改变真机响应。`NativeTemplates.kt` 定义固定只读模板。真实平台适配器放在 `app` 模块的独立平台包中，在实际接入时创建；不要放入 `demo` 或把 Android 类型引入 `core`。真正涉及权限、无障碍服务和页面交互时才增加相应组件，并保留中断、取消、错误对象与失败不覆盖旧结果的测试。
 
 当前协议只支持读取。如果需要点击或多阶段任务，应先设计动作的确认、取消点、幂等性与恢复规则，再扩展核心协议。
 

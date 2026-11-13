@@ -23,6 +23,13 @@ class MockRuleCompiler(templates: List<TemplateDefinition>) : RuleCompiler {
             return CompileResult.Unsupported("当前原型只演示信息读取，暂不支持下单、支付或修改数据。")
         }
 
+        // 真机请求只匹配已经核验的固定模板，不回退到模拟取件码。
+        if ("菜鸟" in request) {
+            val template = availableTemplates.singleOrNull { it.id == "cainiao-empty" }
+            return if (template != null && request == template.examplePrompt) CompileResult.Success(template)
+            else CompileResult.Unsupported("菜鸟目前仅支持“核验菜鸟暂无待取包裹”，暂不读取真实取件码。")
+        }
+
         // 命中两种及以上就拒绝，避免一条描述悄悄落到其中一个模板。
         val matchingKinds = keywords.filterValues { words -> words.any { matches(request, it) } }.keys
         if (matchingKinds.size > 1) {
@@ -31,7 +38,7 @@ class MockRuleCompiler(templates: List<TemplateDefinition>) : RuleCompiler {
         if (matchingKinds.isEmpty()) {
             return CompileResult.Unsupported("暂未匹配到模板。当前支持快递取件、外卖进度和出行安排。")
         }
-        val template = availableTemplates.singleOrNull { it.kind == matchingKinds.single() }
+        val template = availableTemplates.singleOrNull { it.kind == matchingKinds.single() && it.rule.sourceId.startsWith("demo.") }
             ?: return CompileResult.Unsupported("这个演示模板暂不可用，请选择其他模板。")
         return CompileResult.Success(template)
     }

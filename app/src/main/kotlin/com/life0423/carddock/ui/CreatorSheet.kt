@@ -75,7 +75,7 @@ internal fun CreatorSheet(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Text(
-                    "描述想放进空间的功能，试运行并核验结果后再保存。当前支持下面的演示模板。",
+                    "描述想放进空间的功能，试运行并核验结果后再保存。选择下方模板开始。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = DockColors.Muted,
                 )
@@ -125,7 +125,7 @@ internal fun CreatorSheet(
                     Text(
                         when {
                             busy -> "正在试运行…"
-                            draft.phase == RunPhase.NEEDS_USER -> "模拟接管后重新试运行"
+                            draft.phase == RunPhase.NEEDS_USER -> "完成操作后重新试运行"
                             else -> "试运行并预览"
                         },
                         Modifier.padding(start = 8.dp),
@@ -135,7 +135,7 @@ internal fun CreatorSheet(
                     Text("关闭弹层会取消本次试运行。", color = DockColors.Muted, style = MaterialTheme.typography.bodySmall)
                 }
                 if (draft.phase == RunPhase.NEEDS_USER) {
-                    Text("演示接管后会重新读取并核验结果。", color = DockColors.Muted, style = MaterialTheme.typography.bodySmall)
+                    Text("继续后会重新读取并核验结果。", color = DockColors.Muted, style = MaterialTheme.typography.bodySmall)
                 }
                 if (draft.message.isNotBlank()) {
                     Text(

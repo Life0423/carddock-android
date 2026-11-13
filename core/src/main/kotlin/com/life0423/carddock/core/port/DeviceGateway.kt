@@ -8,6 +8,7 @@ data class DeviceSnapshot(
     val sourceId: String,
     val targetKey: String,
     val fields: Map<String, String>,
+    val sourceLabel: String = "模拟设备 · 演示数据",
 )
 
 /** 一次观察的三种结果。Ready 仍要经过引擎的来源和目标核对，不能直接写成卡片快照。 */

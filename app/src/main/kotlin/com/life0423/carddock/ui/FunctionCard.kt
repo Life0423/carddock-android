@@ -102,7 +102,7 @@ internal fun FunctionCard(
 
             HorizontalDivider(color = DockColors.Outline.copy(alpha = 0.5f))
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(card.snapshot?.sourceLabel ?: "模拟设备 · 演示数据", style = MaterialTheme.typography.labelSmall, color = DockColors.Muted)
+                Text(card.snapshot?.sourceLabel ?: if (card.rule.sourceId.startsWith("demo.")) "模拟设备 · 演示数据" else "真机 · 待核验", style = MaterialTheme.typography.labelSmall, color = DockColors.Muted)
                 card.snapshot?.let {
                     Text("上次成功 ${formatTimestamp(it.fetchedAt)}", style = MaterialTheme.typography.labelSmall, color = DockColors.Muted)
                 }
@@ -141,7 +141,7 @@ private fun CardActions(
             Text("取消运行")
         }
         phase == RunPhase.NEEDS_USER -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onResume, Modifier.weight(1f).testTag("resume_$id")) { Text("完成模拟接管") }
+            Button(onResume, Modifier.weight(1f).testTag("resume_$id")) { Text("重新核验") }
             TextButton(onCancel, Modifier.testTag("cancel_$id")) { Text("取消") }
         }
         else -> FilledTonalButton(onRefresh, Modifier.fillMaxWidth().testTag("refresh_$id")) {

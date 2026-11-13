@@ -41,7 +41,7 @@ internal fun TemplatesScreen(templates: List<TemplateDefinition>, onUse: (Templa
         }
         item {
             Text(
-                "这些模板使用通用模拟页面，暂未接入第三方应用。",
+                "演示模板使用模拟数据；真机模板需先启用页面读取。",
                 style = MaterialTheme.typography.bodySmall,
                 color = DockColors.Muted,
             )
@@ -57,7 +57,7 @@ private fun TemplateCard(template: TemplateDefinition, onUse: () -> Unit) {
                 KindIcon(template.kind)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(template.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    Text("内置演示模板", style = MaterialTheme.typography.labelSmall, color = DockColors.Muted)
+                    Text(if (template.rule.sourceId.startsWith("demo.")) "内置演示模板" else "真机只读模板", style = MaterialTheme.typography.labelSmall, color = DockColors.Muted)
                 }
             }
             Text(template.description, style = MaterialTheme.typography.bodyMedium, color = DockColors.Muted)
