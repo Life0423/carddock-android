@@ -51,6 +51,15 @@ class AtomicFileCardStoreTest {
     }
 
     @Test
+    fun nativeRuleAndSourceSurviveAtomicFileReload() = runBlocking {
+        val template = com.life0423.carddock.cainiaoEmptyTemplate
+        val card = CardRecord("native", template.title, template.kind, template.rule,
+            CardSnapshot(listOf(FieldValue("status", "待取状态", "暂无待取包裹")), 123L, "菜鸟 · 当前页面"))
+        newStore().save(listOf(card))
+        assertEquals(listOf(card), newStore().load())
+    }
+
+    @Test
     fun firstLaunchDiffersFromAUserSavedEmptyCollection() = runBlocking {
         val store = newStore()
         assertNull(store.load())

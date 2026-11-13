@@ -38,6 +38,22 @@ class CardDockUiTest {
     val compose = createComposeRule()
 
     @Test
+    fun nativeTemplateAndPermissionEntryAreReachable() {
+        var settingsOpened = false
+        val templates = TemplateCatalog.templates + com.life0423.carddock.cainiaoEmptyTemplate
+        compose.setContent { CardDockApp(UiFixture.state(templates), UiFixture.actions(mutableListOf()), { settingsOpened = true }) }
+        compose.onNodeWithTag("tab_templates").performClick()
+        compose.onNodeWithTag("templates_list").performScrollToNode(hasTestTag("use_template_cainiao-empty"))
+        compose.onNodeWithText("真机只读模板").assertIsDisplayed()
+        compose.captureScreen("05-native-template")
+        compose.onNodeWithTag("tab_profile").performClick()
+        compose.onNodeWithTag("profile_list").performScrollToNode(hasTestTag("accessibility_settings"))
+        compose.captureScreen("06-native-settings")
+        compose.onNodeWithTag("accessibility_settings").performClick()
+        assertTrue(settingsOpened)
+    }
+
+    @Test
     fun navigationTemplatesAndResetDispatchExplicitActions() {
         val events = mutableListOf<String>()
         compose.setContent { CardDockApp(UiFixture.state(TemplateCatalog.templates), UiFixture.actions(events)) }
@@ -86,7 +102,7 @@ class CardDockUiTest {
         compose.setContent { CardDockApp(state.value, UiFixture.actions(events)) }
 
         compose.onNodeWithTag("creator_save").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithText("模拟接管后重新试运行").performScrollTo().performClick()
+        compose.onNodeWithText("完成操作后重新试运行").performScrollTo().performClick()
         assertEquals(listOf("trial"), events)
 
         compose.runOnIdle { state.value = state.value.copy(draft = draft.copy(phase = RunPhase.RUNNING)) }

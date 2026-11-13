@@ -24,7 +24,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             val viewModel: CardDockViewModel = viewModel(factory = CardDockViewModel.factory(controller))
             val state = viewModel.state.collectAsStateWithLifecycle()
-            CardDockApp(state = state.value, actions = viewModel.actions)
+            CardDockApp(state = state.value, actions = viewModel.actions, openAccessibilitySettings = {
+                startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            })
         }
     }
 }

@@ -43,7 +43,7 @@ import com.life0423.carddock.ui.theme.DockColors
  * 保存一点击就切到空间页，不等写入成功；失败时弹层仍在，底下已经是空间。
  */
 @Composable
-fun CardDockApp(state: PrototypeState, actions: PrototypeActions) {
+fun CardDockApp(state: PrototypeState, actions: PrototypeActions, openAccessibilitySettings: () -> Unit = {}) {
     CardDockTheme {
         var selectedTab by rememberSaveable { mutableIntStateOf(0) }
         val snackbarHost = remember { SnackbarHostState() }
@@ -70,7 +70,7 @@ fun CardDockApp(state: PrototypeState, actions: PrototypeActions) {
                     when (selectedTab) {
                         0 -> SpaceScreen(state.cards, actions)
                         1 -> TemplatesScreen(state.templates, actions.openCreator)
-                        else -> ProfileScreen(state.scenario, actions)
+                        else -> ProfileScreen(state.scenario, actions, openAccessibilitySettings)
                     }
                 }
             }
@@ -104,7 +104,7 @@ private fun BrandHeader() {
             fontWeight = FontWeight.Bold,
             modifier = Modifier.weight(1f),
         )
-        TextPill("演示模式", DockColors.Amber)
+        TextPill("原型", DockColors.Amber)
     }
 }
 
