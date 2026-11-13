@@ -1,6 +1,8 @@
-# CardDock 真机实验原型
+# CardDock 真机能力参考
 
 `mika-android/` 是独立的 Android Gradle 工程，基于 [Mika v0.1.38](https://github.com/wangzan101/Mika/releases/tag/v0.1.38)（`5d3c7f9c0ce521812632674776b780a1b4bbf58a`）。CardDock 根目录仍是模拟设备原型。打开 Android Studio 时选择要运行的工程目录。
+
+本目录作为迁移参考保留，不作为团队产品主线。新业务优先修改根目录 `app/core`；本工程的 UI、Room 数据库与动作规则不直接替换主工程。CardDock 入口位于 `app/src/debug`，release 不包含这些入口。上游 README 中的下载和反馈链接属于 Mika，不是 CardDock 的发布渠道。
 
 ## 当前功能
 

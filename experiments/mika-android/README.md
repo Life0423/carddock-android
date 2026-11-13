@@ -1,3 +1,5 @@
+> CardDock migration reference: this snapshot includes local debug-only CardDock features. Upstream downloads below do not contain them. Build instructions and limitations: [CardDock experiment](../README.md). The product mainline is the repository-root app/core project.
+
 > 这是 CardDock 的真机实验源码快照。请使用[原型构建与运行说明](../README.md)进入卡片及采样实验。以下内容介绍上游 Mika。
 
 <div align="center">
