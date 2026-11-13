@@ -23,6 +23,13 @@ class MockRuleCompiler(templates: List<TemplateDefinition>) : RuleCompiler {
             return CompileResult.Unsupported("当前原型只演示信息读取，暂不支持下单、支付或修改数据。")
         }
 
+        availableTemplates.singleOrNull {
+            !it.rule.sourceId.startsWith("demo.") && it.examplePrompt.lowercase() == request
+        }?.let { return CompileResult.Success(it) }
+        if ("美团" in request || "京东" in request) {
+            return CompileResult.Unsupported("请选择已核验的美团或京东模板。")
+        }
+
         // 真机请求只匹配已经核验的固定模板，不回退到模拟取件码。
         if ("菜鸟" in request) {
             val template = availableTemplates.singleOrNull { it.id == "cainiao-empty" }

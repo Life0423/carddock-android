@@ -20,6 +20,8 @@ data class CreationDraft(
     val phase: RunPhase = RunPhase.IDLE,
     val preview: CardSnapshot? = null,
     val message: String = "",
+    val orderNumber: String = "",
+    val modelCandidate: Boolean = false,
 )
 
 /**
@@ -33,7 +35,11 @@ data class PrototypeState(
     val draft: CreationDraft? = null,
     val scenario: DemoScenario = DemoScenario.NORMAL,
     val notice: String? = null,
+    val sequence: SequenceStatus? = null,
 )
+
+/** 顺序核验停在需要用户切页的项目之前，明确展示当前进度。 */
+data class SequenceStatus(val title: String, val index: Int, val total: Int, val awaitingStart: Boolean)
 
 /**
  * UI events are plain callbacks so previews and tests need no Android services.
@@ -54,4 +60,11 @@ data class PrototypeActions(
     val changeScenario: (DemoScenario) -> Unit,
     val resetDemo: () -> Unit,
     val dismissNotice: () -> Unit,
+    val changeOrderNumber: (String) -> Unit = {},
+    val generateCandidate: () -> Unit = {},
+    val verifyPrice: (String) -> Unit = {},
+    val refreshSequence: (List<String>) -> Unit = {},
+    val advanceSequence: () -> Unit = {},
+    val cancelSequence: () -> Unit = {},
+
 )

@@ -24,7 +24,11 @@ import com.life0423.carddock.ui.theme.DockColors
 
 /** 模板页不执行规则。点试用会带着该模板打开草稿，提示词由控制器预填，规则仍要试运行后才保存。 */
 @Composable
-internal fun TemplatesScreen(templates: List<TemplateDefinition>, onUse: (TemplateDefinition?) -> Unit) {
+internal fun TemplatesScreen(
+    templates: List<TemplateDefinition>,
+    onUse: (TemplateDefinition?) -> Unit,
+    openModelCreator: (() -> Unit)? = null,
+) {
     LazyColumn(
         modifier = Modifier.testTag("templates_list"),
         contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 8.dp, bottom = 24.dp),
@@ -35,6 +39,9 @@ internal fun TemplatesScreen(templates: List<TemplateDefinition>, onUse: (Templa
                 Text("从一个好用的模板开始", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 Text("先试运行，再把功能放进你的空间。", color = DockColors.Muted, style = MaterialTheme.typography.bodyLarge)
             }
+        }
+        if (openModelCreator != null) item {
+            FilledTonalButton(onClick = openModelCreator, modifier = Modifier.fillMaxWidth()) { Text("用模型生成菜鸟候选") }
         }
         items(templates, key = { it.id }) { template ->
             TemplateCard(template, onUse = { onUse(template) })

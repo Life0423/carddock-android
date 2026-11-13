@@ -55,6 +55,38 @@ class CardDockAccessibilityService : AccessibilityService() {
         return CainiaoObservation(packageName, labels, password)
     }
 
+    /** 只读取请求的活动窗口。系统浮窗和其他应用不会提供详情证据。 */
+    @Suppress("DEPRECATION")
+    internal fun observeDetail(expected: String): DetailWindow? {
+        val root = rootInActiveWindow ?: return null
+        val source = root.packageName?.toString()
+        if (source != expected) {
+            root.recycle()
+            return DetailWindow(source, emptyList(), false)
+        }
+        val rows = mutableListOf<DetailNode>()
+        var password = false
+        fun visit(node: AccessibilityNodeInfo, parent: Int) {
+            try {
+                if (node.packageName?.toString() != expected) return
+                if (node.isPassword) {
+                    password = password || node.isVisibleToUser
+                    return
+                }
+                val index = rows.size
+                val visible = node.isVisibleToUser
+                val label = if (visible) (node.text ?: node.contentDescription)?.toString().orEmpty()
+                    .replace(formatCharacters, "").trim() else ""
+                rows += DetailNode(parent, node.viewIdResourceName, node.className?.toString(), label, visible)
+                for (child in 0 until node.childCount) node.getChild(child)?.let { visit(it, index) }
+            } finally {
+                node.recycle()
+            }
+        }
+        visit(root, -1)
+        return DetailWindow(source, rows, password)
+    }
+
     companion object {
         internal var instance: CardDockAccessibilityService? = null
             private set

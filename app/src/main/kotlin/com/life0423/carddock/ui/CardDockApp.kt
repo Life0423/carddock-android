@@ -32,6 +32,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.life0423.carddock.R
+import com.life0423.carddock.PrototypeTools
 import com.life0423.carddock.core.session.PrototypeActions
 import com.life0423.carddock.core.session.PrototypeState
 import com.life0423.carddock.ui.theme.CardDockTheme
@@ -43,7 +44,16 @@ import com.life0423.carddock.ui.theme.DockColors
  * 保存一点击就切到空间页，不等写入成功；失败时弹层仍在，底下已经是空间。
  */
 @Composable
-fun CardDockApp(state: PrototypeState, actions: PrototypeActions, openAccessibilitySettings: () -> Unit = {}) {
+internal fun CardDockApp(
+    state: PrototypeState,
+    actions: PrototypeActions,
+    openAccessibilitySettings: () -> Unit = {},
+    tools: PrototypeTools? = null,
+    openModelCreator: () -> Unit = {},
+    saveModel: (String, String, String) -> Unit = { _, _, _ -> },
+    clearModel: () -> Unit = {},
+    saveShopping: (String) -> Unit = {},
+) {
     CardDockTheme {
         var selectedTab by rememberSaveable { mutableIntStateOf(0) }
         val snackbarHost = remember { SnackbarHostState() }
@@ -59,7 +69,7 @@ fun CardDockApp(state: PrototypeState, actions: PrototypeActions, openAccessibil
             containerColor = DockColors.Background,
             topBar = { BrandHeader() },
             bottomBar = {
-                DockNavigation(selectedTab = selectedTab, onSelect = { selectedTab = it })
+                DockNavigation(selectedTab = selectedTab, onSelect = { selectedTab = it }, shopping = tools != null)
             },
             snackbarHost = { SnackbarHost(snackbarHost) },
         ) { contentPadding ->
@@ -68,9 +78,10 @@ fun CardDockApp(state: PrototypeState, actions: PrototypeActions, openAccessibil
                     CircularProgressIndicator(Modifier.align(Alignment.Center))
                 } else {
                     when (selectedTab) {
-                        0 -> SpaceScreen(state.cards, actions)
-                        1 -> TemplatesScreen(state.templates, actions.openCreator)
-                        else -> ProfileScreen(state.scenario, actions, openAccessibilitySettings)
+                        0 -> SpaceScreen(state.cards, actions, state.sequence)
+                        1 -> TemplatesScreen(state.templates, actions.openCreator, openModelCreator.takeIf { tools != null })
+                        2 -> ProfileScreen(state.scenario, actions, openAccessibilitySettings, tools, saveModel, clearModel)
+                        else -> if (tools != null) ShoppingScreen(state.cards, state.sequence, tools, actions, saveShopping)
                     }
                 }
             }
@@ -109,10 +120,10 @@ private fun BrandHeader() {
 }
 
 @Composable
-private fun DockNavigation(selectedTab: Int, onSelect: (Int) -> Unit) {
-    val labels = listOf("空间", "模板", "我的")
-    val tags = listOf("space", "templates", "profile")
-    val icons = listOf(DockIcons.Dashboard, DockIcons.GridView, DockIcons.PersonOutline)
+private fun DockNavigation(selectedTab: Int, onSelect: (Int) -> Unit, shopping: Boolean) {
+    val labels = if (shopping) listOf("空间", "模板", "我的", "选购") else listOf("空间", "模板", "我的")
+    val tags = listOf("space", "templates", "profile", "shopping")
+    val icons = listOf(DockIcons.Dashboard, DockIcons.GridView, DockIcons.PersonOutline, DockIcons.Inventory2)
     NavigationBar(containerColor = DockColors.Background, tonalElevation = 0.dp) {
         labels.forEachIndexed { index, label ->
             NavigationBarItem(

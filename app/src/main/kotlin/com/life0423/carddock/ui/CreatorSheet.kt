@@ -1,6 +1,9 @@
 package com.life0423.carddock.ui
 
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -79,7 +82,7 @@ internal fun CreatorSheet(
                     style = MaterialTheme.typography.bodyMedium,
                     color = DockColors.Muted,
                 )
-                OutlinedTextField(
+                if (!draft.modelCandidate) OutlinedTextField(
                     value = draft.prompt,
                     onValueChange = actions.changePrompt,
                     enabled = !busy,
@@ -90,7 +93,7 @@ internal fun CreatorSheet(
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth().testTag("creator_prompt"),
                 )
-                Row(
+                if (!draft.modelCandidate) Row(
                     Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -100,6 +103,25 @@ internal fun CreatorSheet(
                             label = { Text(template.title) },
                             enabled = !busy,
                         )
+                    }
+                }
+                if (draft.template?.requiresOrderNumber == true || templates.any {
+                    it.requiresOrderNumber && it.examplePrompt.equals(draft.prompt.trim(), ignoreCase = true)
+                }) {
+                    OutlinedTextField(
+                        value = draft.orderNumber, onValueChange = actions.changeOrderNumber,
+                        label = { Text("本机订单号码") }, enabled = !busy, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (draft.modelCandidate) {
+                    FilledTonalButton(onClick = actions.generateCandidate, enabled = !busy) {
+                        Text("生成菜鸟候选")
+                    }
+                    draft.template?.rule?.let { rule ->
+                        Text(rule.id + " · 菜鸟待取空状态")
+                        Text("核对取包裹页面 → 读取待取状态 → 检查状态非空")
                     }
                 }
                 OutlinedTextField(
@@ -117,7 +139,7 @@ internal fun CreatorSheet(
                         focusManager.clearFocus()
                         actions.trialDraft()
                     },
-                    enabled = draft.prompt.isNotBlank() && !busy,
+                    enabled = draft.prompt.isNotBlank() && !busy && (!draft.modelCandidate || draft.template != null),
                     modifier = Modifier.fillMaxWidth().testTag("creator_trial"),
                 ) {
                     if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)

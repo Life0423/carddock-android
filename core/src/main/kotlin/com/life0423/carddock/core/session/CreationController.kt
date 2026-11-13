@@ -3,6 +3,8 @@ package com.life0423.carddock.core.session
 import com.life0423.carddock.core.engine.EngineResult
 import com.life0423.carddock.core.engine.RuleEngine
 import com.life0423.carddock.core.model.CardRecord
+import com.life0423.carddock.core.model.LocalTarget
+import com.life0423.carddock.core.port.ReadOptions
 import com.life0423.carddock.core.model.RunInfo
 import com.life0423.carddock.core.model.RunPhase
 import com.life0423.carddock.core.model.TemplateDefinition
@@ -25,6 +27,7 @@ import kotlinx.coroutines.sync.withLock
  */
 internal class CreationController(
     private val compiler: RuleCompiler,
+    private val modelCompiler: RuleCompiler?,
     private val engine: RuleEngine,
     private val cards: CardCollection,
     private val lane: Mutex,
@@ -39,11 +42,13 @@ internal class CreationController(
     private var work: Job? = null
 
     /** 先关掉上一轮并作废其代际。模板只预填提示词和标题，规则要等试运行编译成功才进草稿。 */
-    fun open(template: TemplateDefinition?) {
+    fun open(template: TemplateDefinition?, model: Boolean = false) {
         close()
         mutableDraft.value = CreationDraft(
             prompt = template?.examplePrompt.orEmpty(),
             title = template?.title.orEmpty(),
+            template = template.takeUnless { model },
+            modelCandidate = model,
         )
     }
 
@@ -61,10 +66,19 @@ internal class CreationController(
         if (current.phase.isBusy()) return
         mutableDraft.value = current.copy(
             prompt = prompt.take(500),
+            orderNumber = "",
             template = null,
             phase = RunPhase.IDLE,
             preview = null,
             message = "",
+        )
+    }
+
+    /** 修改本机订单号后必须重新试运行。 */
+    fun changeOrderNumber(value: String) {
+        val current = draft.value ?: return
+        if (!current.phase.isBusy()) mutableDraft.value = current.copy(
+            orderNumber = value.take(30), phase = RunPhase.IDLE, preview = null, message = "",
         )
     }
 
@@ -75,18 +89,26 @@ internal class CreationController(
     }
 
     /** 已有仍活跃的试运行或保存时直接返回。取消收尾中 isActive 为 false，这道检查让开。空白提示词不改阶段。 */
-    fun trial() {
+    fun trial(generate: Boolean = false) {
         val current = draft.value ?: return
-        if (work?.isActive == true || current.prompt.isBlank()) return
+        if (work?.isActive == true || current.prompt.isBlank() || generate && !current.modelCandidate) return
         val token = generation
+        if (current.modelCandidate && !generate && current.template == null) return
         mutableDraft.value = current.copy(
-            phase = RunPhase.QUEUED, preview = null, template = null,
-            message = "正在匹配模板…",
+            phase = RunPhase.QUEUED, preview = null,
+            template = if (generate) null else current.template,
+            message = if (generate) "正在生成菜鸟候选…" else "正在匹配模板…",
         )
         work = scope.launch {
             try {
                 // 编译放在通道锁外，匹配模板时不堵住正在刷新的卡片。
-                when (val compiled = compiler.compile(current.prompt.trim())) {
+                val compiled = when {
+                    generate -> modelCompiler?.compile(current.prompt)
+                        ?: CompileResult.Unsupported("请先在“我的”配置模型。")
+                    current.modelCandidate -> CompileResult.Success(checkNotNull(current.template))
+                    else -> compiler.compile(current.prompt.trim())
+                }
+                when (compiled) {
                     is CompileResult.Unsupported -> edit(token) {
                         it.copy(phase = RunPhase.FAILED, message = compiled.message)
                     }
@@ -96,11 +118,22 @@ internal class CreationController(
                             title = it.title.ifBlank { compiled.template.title },
                             message = "等待设备操作通道",
                         ) }
+                        if (generate) {
+                            edit(token) { it.copy(phase = RunPhase.IDLE, message = "候选已生成，请检查规则后试运行。") }
+                            return@launch
+                        }
+                        val target = if (compiled.template.requiresOrderNumber) {
+                            if (!current.orderNumber.matches(Regex("[0-9]{15,30}"))) {
+                                edit(token) { it.copy(phase = RunPhase.FAILED, message = "请输入完整订单号码（15–30 位数字）。") }
+                                return@launch
+                            }
+                            LocalTarget(current.orderNumber)
+                        } else null
                         lane.withLock {
                             // 排队等锁期间可能已被关闭。拿到锁后再检查，避免把取消写成一次读取。
                             ensureActive()
-                            edit(token) { it.copy(phase = RunPhase.RUNNING, message = "正在读取设备…") }
-                            val result = engine.execute(compiled.template.rule) { progress ->
+                            edit(token) { it.copy(phase = RunPhase.RUNNING, message = "正在读取页面…") }
+                            val result = engine.execute(compiled.template.rule, ReadOptions(localTarget = target)) { progress ->
                                 edit(token) { it.copy(message = progress.message) }
                             }
                             ensureActive()
@@ -150,9 +183,10 @@ internal class CreationController(
             val card = CardRecord(
                 id = newId(), title = current.title.trim(), kind = template.kind,
                 rule = template.rule, snapshot = preview,
+                localTarget = current.orderNumber.takeIf { template.requiresOrderNumber }?.let(::LocalTarget),
                 run = RunInfo(
                     id = newId(), phase = RunPhase.SUCCEEDED,
-                    message = "试运行已核验 · 演示数据",
+                    message = "试运行已核验 · ${preview.sourceLabel}",
                     currentStep = template.rule.steps.size, totalSteps = template.rule.steps.size,
                     startedAt = preview.fetchedAt, endedAt = now(),
                 ),
