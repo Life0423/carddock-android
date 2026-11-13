@@ -4,6 +4,8 @@ import com.life0423.carddock.core.model.CardSnapshot
 import com.life0423.carddock.core.model.FieldValue
 import com.life0423.carddock.core.port.DeviceGateway
 import com.life0423.carddock.core.port.DeviceResponse
+import com.life0423.carddock.core.port.ReadOptions
+import com.life0423.carddock.core.port.orderIdentity
 import com.life0423.carddock.core.rule.RuleSpec
 import com.life0423.carddock.core.rule.RuleStep
 import com.life0423.carddock.core.rule.RuleValidator
@@ -30,6 +32,7 @@ class RuleEngine(
      */
     suspend fun execute(
         rule: RuleSpec,
+        options: ReadOptions = ReadOptions(),
         onProgress: suspend (RunProgress) -> Unit = {},
     ): EngineResult {
         currentCoroutineContext().ensureActive()
@@ -37,10 +40,10 @@ class RuleEngine(
         val plan = rule.copy(steps = rule.steps.toList())
         RuleValidator.validate(plan)?.let { return EngineResult.Failure(it.code, it.message) }
 
-        onProgress(RunProgress(0, plan.steps.size, "正在读取页面"))
+        onProgress(RunProgress(0, plan.steps.size, device.instruction(plan.sourceId, options)))
         currentCoroutineContext().ensureActive()
         val response = try {
-            device.inspect(plan.sourceId, plan.targetKey)
+            device.inspect(plan.sourceId, plan.targetKey, options)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -65,7 +68,8 @@ class RuleEngine(
         if (snapshot.sourceId != plan.sourceId) {
             return EngineResult.Failure("SOURCE_MISMATCH", "页面来源与规则不一致，未提取数据。")
         }
-        if (snapshot.targetKey != plan.targetKey) {
+        val expected = options.localTarget?.let { orderIdentity(it.orderNumber) } ?: plan.targetKey
+        if (snapshot.targetKey != expected) {
             return EngineResult.Failure("TARGET_MISMATCH", "读取到的对象不是指定目标，未更新结果。")
         }
 
@@ -75,12 +79,7 @@ class RuleEngine(
         for ((index, step) in plan.steps.withIndex()) {
             currentCoroutineContext().ensureActive()
             val progressMessage = when (step) {
-                is RuleStep.AssertTarget -> {
-                    if (snapshot.targetKey != step.expectedKey) {
-                        return EngineResult.Failure("TARGET_MISMATCH", "目标核对失败，未更新结果。")
-                    }
-                    "目标核对通过"
-                }
+                is RuleStep.AssertTarget -> "目标核对通过"
 
                 is RuleStep.ReadField -> {
                     val value = observedFields[step.sourceField]
@@ -102,6 +101,6 @@ class RuleEngine(
             currentCoroutineContext().ensureActive()
         }
 
-        return EngineResult.Success(CardSnapshot(fields = values.values.toList(), fetchedAt = now(), sourceLabel = snapshot.sourceLabel))
+        return EngineResult.Success(CardSnapshot(fields = values.values.toList(), fetchedAt = now(), sourceLabel = snapshot.sourceLabel), snapshot.appPrice)
     }
 }

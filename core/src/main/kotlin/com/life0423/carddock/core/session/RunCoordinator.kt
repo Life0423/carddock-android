@@ -5,6 +5,7 @@ import com.life0423.carddock.core.engine.RuleEngine
 import com.life0423.carddock.core.model.CardRecord
 import com.life0423.carddock.core.model.RunInfo
 import com.life0423.carddock.core.model.RunPhase
+import com.life0423.carddock.core.port.ReadOptions
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -38,12 +39,15 @@ internal class RunCoordinator(
      * 收尾才摘不掉这次 job：start 正持有同一把可重入的锁。launch 返回后会留下一个已结束任务。
      * 正常读设备会先挂起，不走这条。
      */
-    fun start(cardId: String) {
+    fun start(cardId: String, appPrice: Boolean = false): Job? {
+        val requestedAt = if (appPrice) now() else null
         synchronized(jobs) {
-            if (jobs[cardId]?.isActive == true || cards.find(cardId) == null) return
-            val job = scope.launch(start = CoroutineStart.LAZY) { run(cardId) }
+            jobs[cardId]?.takeIf { it.isActive }?.let { return it }
+            if (cards.find(cardId) == null) return null
+            val job = scope.launch(start = CoroutineStart.LAZY) { run(cardId, appPrice, requestedAt) }
             jobs[cardId] = job
             job.start()
+            return job
         }
     }
 
@@ -84,18 +88,19 @@ internal class RunCoordinator(
     fun hasLiveJob(cardId: String): Boolean =
         synchronized(jobs) { jobs[cardId]?.isCompleted == false }
 
-    private suspend fun run(cardId: String) {
+    private suspend fun run(cardId: String, appPrice: Boolean, requestedAt: Long?) {
         val job = currentCoroutineContext()[Job]
         val runId = newId()
         try {
             val card = cards.find(cardId) ?: return
             val queued = cards.update { current -> current.map {
-                if (it.id == cardId) it.copy(run = RunInfo(
+                if (it.id == cardId) it.copy(priceVerificationFailed = appPrice || it.priceVerificationFailed, run = RunInfo(
                     id = runId,
                     phase = RunPhase.QUEUED,
                     message = "等待设备操作通道",
                     totalSteps = card.rule.steps.size,
                     startedAt = now(),
+                    appPrice = appPrice,
                 )) else it
             } }
             if (!queued) {
@@ -112,9 +117,9 @@ internal class RunCoordinator(
                 currentCoroutineContext().ensureActive()
                 update(cardId, runId) { it.copy(run = it.run!!.copy(
                     phase = RunPhase.RUNNING,
-                    message = "正在读取模拟设备",
+                    message = "正在读取页面",
                 )) }
-                val result = engine.execute(card.rule) { progress ->
+                val result = engine.execute(card.rule, ReadOptions(card.localTarget, appPrice, requestedAt)) { progress ->
                     update(cardId, runId) { it.copy(run = it.run!!.copy(
                         currentStep = progress.currentStep,
                         totalSteps = progress.totalSteps,
@@ -125,10 +130,16 @@ internal class RunCoordinator(
                 val committed = update(cardId, runId) { current ->
                     val run = current.run!!
                     when (result) {
-                        is EngineResult.Success -> current.copy(
+                        is EngineResult.Success -> if (appPrice && result.appPrice == null) {
+                            current.copy(run = run.copy(
+                                phase = RunPhase.FAILED, message = "未核验到 App 展示价", endedAt = now(),
+                            ))
+                        } else current.copy(
                             snapshot = result.snapshot,
+                            appPrice = result.appPrice ?: current.appPrice,
+                            priceVerificationFailed = if (appPrice) false else current.priceVerificationFailed,
                             run = run.copy(phase = RunPhase.SUCCEEDED,
-                                message = "核验通过 · 演示数据", endedAt = now()),
+                                message = "核验通过 · ${result.snapshot.sourceLabel}", endedAt = now()),
                         )
                         is EngineResult.NeedsUser -> current.copy(run = run.copy(
                             phase = RunPhase.NEEDS_USER, message = result.message, endedAt = now(),

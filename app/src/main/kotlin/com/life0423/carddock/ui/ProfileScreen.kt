@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.life0423.carddock.PrototypeTools
 import com.life0423.carddock.core.session.DemoScenario
 import com.life0423.carddock.core.session.PrototypeActions
 import com.life0423.carddock.ui.theme.DockColors
@@ -39,7 +40,11 @@ import com.life0423.carddock.ui.theme.DockColors
  * 提交前失败时磁盘仍是旧内容。提交后若读回失败，replace 返回 false：磁盘上可能已是种子，内存仍是旧卡，并暂停后续写入。
  */
 @Composable
-internal fun ProfileScreen(scenario: DemoScenario, actions: PrototypeActions, openAccessibilitySettings: () -> Unit = {}) {
+internal fun ProfileScreen(
+    scenario: DemoScenario, actions: PrototypeActions, openAccessibilitySettings: () -> Unit = {},
+    tools: PrototypeTools? = null, saveModel: (String, String, String) -> Unit = { _, _, _ -> },
+    clearModel: () -> Unit = {},
+) {
     var confirmReset by remember { mutableStateOf(false) }
     LazyColumn(
         modifier = Modifier.testTag("profile_list"),
@@ -58,7 +63,7 @@ internal fun ProfileScreen(scenario: DemoScenario, actions: PrototypeActions, op
                     TextPill("CardDock · 原型", DockColors.Mint)
                     Text("你的卡片，保存在这台设备", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "演示模板读取模拟数据；菜鸟真机模板在你主动试运行或刷新时读取当前页面。页面内容不上传到模型服务。",
+                        "演示模板读取模拟数据。真实页面仅在主动核验时读取，模型只接收固定菜鸟需求。",
                         style = MaterialTheme.typography.bodyMedium,
                         color = DockColors.Muted,
                     )
@@ -67,11 +72,12 @@ internal fun ProfileScreen(scenario: DemoScenario, actions: PrototypeActions, op
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("菜鸟页面读取", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("启用卡坞无障碍服务后，选择菜鸟真机模板。开始读取后 20 秒内手动切到菜鸟取包裹页，再返回卡坞查看结果。服务只在主动读取期间检查可见页面；可随时在系统设置关闭。", style = MaterialTheme.typography.bodyMedium, color = DockColors.Muted)
+                Text("第三方页面读取", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("开启后可主动核验菜鸟取包裹、美团历史订单和京东 App 展示价。", style = MaterialTheme.typography.bodyMedium, color = DockColors.Muted)
                 OutlinedButton(onClick = openAccessibilitySettings, modifier = Modifier.fillMaxWidth().testTag("accessibility_settings")) { Text("打开无障碍设置") }
             }
         }
+        if (tools != null) item { ModelSettingsForm(tools, saveModel, clearModel) }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("演示场景", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)

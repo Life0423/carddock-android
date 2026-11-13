@@ -6,6 +6,8 @@ import com.life0423.carddock.core.model.RunPhase
 import com.life0423.carddock.core.model.TemplateDefinition
 import com.life0423.carddock.core.port.CardStore
 import com.life0423.carddock.core.port.RuleCompiler
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -33,6 +35,8 @@ class PrototypeController(
     private val setDeviceScenario: (DemoScenario) -> Unit = {},
     now: () -> Long = System::currentTimeMillis,
     newId: () -> String = { UUID.randomUUID().toString() },
+    modelCompiler: RuleCompiler? = null,
+    private val needsManualSequenceStart: (CardRecord) -> Boolean = { false },
 ) {
     private val notice = MutableStateFlow<String?>(null)
     private val scenario = MutableStateFlow(DemoScenario.NORMAL)
@@ -47,23 +51,32 @@ class PrototypeController(
         liveJob = runs::hasLiveJob
     }
 
-    private val creator = CreationController(compiler, engine, cards, lane, scope, now, newId, ::notify)
+    private val creator = CreationController(compiler, modelCompiler, engine, cards, lane, scope, now, newId, ::notify)
+    private val sequence = MutableStateFlow<SequenceStatus?>(null)
+    private var sequenceJob: Job? = null
+    private var nextItem: CompletableDeferred<Unit>? = null
     private var initialized = false
     // 重置完成前拒绝打开、刷新和继续，避免新的读取插进种子卡替换之前。
     private var resetting = false
 
     // Eagerly：应用 scope 一直订阅，不依赖界面是否在收集。初始值只有模板，卡片要等 initialize。
-    val state: StateFlow<PrototypeState> = combine(cards.state, creator.draft, scenario, notice) {
-            collection, draft, selectedScenario, message ->
+    val state: StateFlow<PrototypeState> = combine(cards.state, creator.draft, scenario, notice, sequence) {
+            collection, draft, selectedScenario, message, runningSequence ->
         PrototypeState(
             loading = collection.loading, cards = collection.cards, templates = templates,
-            draft = draft, scenario = selectedScenario, notice = message,
+            draft = draft, scenario = selectedScenario, notice = message, sequence = runningSequence,
         )
     }.stateIn(scope, SharingStarted.Eagerly, PrototypeState(templates = templates))
 
     val actions = PrototypeActions(
-        openCreator = { if (!resetting && !cards.state.value.loading) creator.open(it) },
+        openCreator = { if (!resetting && !cards.state.value.loading && sequence.value == null) creator.open(it) },
         closeCreator = creator::close,
+        changeOrderNumber = creator::changeOrderNumber,
+        generateCandidate = { creator.trial(generate = true) },
+        verifyPrice = { if (!resetting && sequence.value == null) runs.start(it, appPrice = true) },
+        refreshSequence = ::refreshSequence,
+        advanceSequence = { nextItem?.complete(Unit) },
+        cancelSequence = { sequenceJob?.cancel() },
         changePrompt = creator::changePrompt,
         changeTitle = creator::changeTitle,
         trialDraft = {
@@ -72,13 +85,13 @@ class PrototypeController(
             creator.trial()
         },
         saveDraft = creator::save,
-        refreshCard = { if (!resetting) runs.start(it) },
+        refreshCard = { if (!resetting && sequence.value == null) runs.start(it) },
         cancelCard = runs::cancel,
         resumeCard = {
-            if (!resetting) {
+            if (!resetting && sequence.value == null) {
                 // 继续会把场景拨回正常再读。否则若仍停在接管、读取失败或错目标，这次刷新不会核验通过。
                 changeScenario(DemoScenario.NORMAL)
-                runs.start(it)
+                runs.start(it, appPrice = cards.find(it)?.run?.appPrice == true)
             }
         },
         deleteCard = { id -> scope.launch {
@@ -90,6 +103,40 @@ class PrototypeController(
         resetDemo = ::reset,
         dismissNotice = { notice.value = null },
     )
+
+    /** 模型草稿与普通创建共用同一个试运行和保存入口。 */
+    fun openModelCreator(template: TemplateDefinition) {
+        if (!resetting && !cards.state.value.loading && sequence.value == null) creator.open(template, model = true)
+    }
+
+    /** 手动切页项由用户确认开始；完成、超时或取消当前项后才推进。 */
+    private fun refreshSequence(ids: List<String>) {
+        if (resetting || sequenceJob?.isCompleted == false || creator.draft.value != null ||
+            cards.state.value.cards.any { runs.hasLiveJob(it.id) }) return
+        val selected = ids.distinct().mapNotNull(cards::find)
+        sequenceJob = scope.launch {
+            var active: Job? = null
+            try {
+                selected.forEachIndexed { index, card ->
+                    if (needsManualSequenceStart(card)) {
+                        val proceed = CompletableDeferred<Unit>()
+                        nextItem = proceed
+                        sequence.value = SequenceStatus(card.title, index + 1, selected.size, awaitingStart = true)
+                        proceed.await()
+                        nextItem = null
+                    }
+                    sequence.value = SequenceStatus(card.title, index + 1, selected.size, awaitingStart = false)
+                    active = runs.start(card.id)
+                    active?.join()
+                    active = null
+                }
+            } finally {
+                active?.cancel()
+                nextItem = null
+                sequence.value = null
+            }
+        }
+    }
 
     /** 只执行一次。重复调用直接返回，避免再次用磁盘或种子盖掉已经在跑的内存状态。 */
     suspend fun initialize() {
@@ -116,6 +163,7 @@ class PrototypeController(
         if (resetting) return
         resetting = true
         creator.close()
+        sequenceJob?.cancel()
         scope.launch {
             try {
                 // 替换前停掉并等全部运行结束。否则还在通道里的读取会继续占锁，重置后的试运行要排在它后面。

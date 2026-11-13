@@ -20,13 +20,22 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
         )
-        val controller = (application as CardDockApplication).container.controller
+        val container = (application as CardDockApplication).container
+        val controller = container.controller
         setContent {
             val viewModel: CardDockViewModel = viewModel(factory = CardDockViewModel.factory(controller))
             val state = viewModel.state.collectAsStateWithLifecycle()
-            CardDockApp(state = state.value, actions = viewModel.actions, openAccessibilitySettings = {
-                startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            })
+            val tools = container.tools.collectAsStateWithLifecycle()
+            CardDockApp(
+                state = state.value, actions = viewModel.actions, openAccessibilitySettings = {
+                    startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                },
+                tools = tools.value,
+                openModelCreator = { controller.openModelCreator(cainiaoEmptyTemplate) },
+                saveModel = container::saveModel,
+                clearModel = container::clearModel,
+                saveShopping = container::saveShopping,
+            )
         }
     }
 }

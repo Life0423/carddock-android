@@ -5,7 +5,7 @@ import kotlinx.serialization.Serializable
 
 /** 三种内置演示。编译器按这个分流，不是用户可扩展的分类。 */
 @Serializable
-enum class TemplateKind { EXPRESS, DELIVERY, TRAVEL }
+enum class TemplateKind { EXPRESS, DELIVERY, TRAVEL, SHOPPING }
 
 /** 规则读出的一项。key 是 outputKey，label 给界面。引擎写入时会去掉 value 的首尾空白。 */
 @Serializable
@@ -59,6 +59,24 @@ data class RunInfo(
     val totalSteps: Int = 0,
     val startedAt: Long = 0,
     val endedAt: Long? = null,
+    val appPrice: Boolean = false,
+)
+
+/** 授权订单号仅用于本机核对，不进入规则和卡片展示字段。 */
+@Serializable
+data class LocalTarget(val orderNumber: String) {
+    override fun toString(): String = "LocalTarget(已隐藏)"
+}
+
+/** 独立于公开身份的京东 App 展示价证据。空优惠字段表示条件未知。 */
+@Serializable
+data class AppPrice(
+    val amount: String,
+    val currency: String,
+    val variant: String,
+    val label: String,
+    val discount: String?,
+    val verifiedAt: Long,
 )
 
 /** 卡片的持久化形态。snapshot 为空表示还没有核验通过的结果。run 是最近一次尝试，可以没有。 */
@@ -70,6 +88,9 @@ data class CardRecord(
     val rule: RuleSpec,
     val snapshot: CardSnapshot? = null,
     val run: RunInfo? = null,
+    val localTarget: LocalTarget? = null,
+    val appPrice: AppPrice? = null,
+    val priceVerificationFailed: Boolean = false,
 )
 
 /** 一条可试运行的演示模板。examplePrompt 只负责预填，编译器仍按用户最终输入分流，不按模板 id。 */
@@ -81,4 +102,5 @@ data class TemplateDefinition(
     val kind: TemplateKind,
     val examplePrompt: String,
     val rule: RuleSpec,
+    val requiresOrderNumber: Boolean = false,
 )

@@ -1,4 +1,4 @@
 <resources>
-    <string name="accessibility_label">卡坞 · 菜鸟只读核验</string>
-    <string name="accessibility_description">仅在你主动试运行或刷新时，读取菜鸟当前可见页面，核验“暂无待取包裹”。不点击、不采集密码、不上传页面。可随时在系统设置关闭。</string>
+    <string name="accessibility_label">卡坞 · 页面只读核验</string>
+    <string name="accessibility_description">仅在你主动试运行或刷新时，读取菜鸟、美团、京东的当前可见页面，核验待取状态、历史订单和指定商品展示价。不点击、不采集密码、不上传页面。可随时在系统设置关闭。</string>
 </resources>

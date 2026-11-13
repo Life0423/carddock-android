@@ -33,12 +33,14 @@ internal fun TemplateKind.icon(): ImageVector = when (this) {
     TemplateKind.EXPRESS -> DockIcons.Inventory2
     TemplateKind.DELIVERY -> DockIcons.LocalShipping
     TemplateKind.TRAVEL -> DockIcons.Train
+    TemplateKind.SHOPPING -> DockIcons.Inventory2
 }
 
 internal fun TemplateKind.accent(): Color = when (this) {
     TemplateKind.EXPRESS -> DockColors.Amber
     TemplateKind.DELIVERY -> DockColors.Mint
     TemplateKind.TRAVEL -> DockColors.Blue
+    TemplateKind.SHOPPING -> DockColors.Mint
 }
 
 @Composable

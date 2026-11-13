@@ -50,6 +50,8 @@ internal fun FunctionCard(
     onCancel: () -> Unit,
     onResume: () -> Unit,
     onDelete: () -> Unit,
+    onPrice: (() -> Unit)? = null,
+    canStart: Boolean = true,
 ) {
     val phase = card.run?.phase ?: if (card.snapshot == null) RunPhase.IDLE else RunPhase.SUCCEEDED
     // 按卡片 id 记住。列表复用到另一张卡时丢掉上一张的删除确认。
@@ -107,7 +109,16 @@ internal fun FunctionCard(
                     Text("上次成功 ${formatTimestamp(it.fetchedAt)}", style = MaterialTheme.typography.labelSmall, color = DockColors.Muted)
                 }
             }
-            CardActions(card.id, phase, onRefresh, onCancel, onResume)
+            if (onPrice != null) {
+                PriceEvidence(card.appPrice)
+                if (card.priceVerificationFailed && card.appPrice != null) {
+                    Text("上次有效价格 · 本次未核验", color = DockColors.Amber)
+                }
+                OutlinedButton(onClick = onPrice, enabled = canStart && !phase.isBusy()) { Text("核验 App 展示价") }
+            }
+            CardActions(card.id, phase, if (card.run?.appPrice == true && onPrice != null &&
+                phase in setOf(RunPhase.FAILED, RunPhase.INTERRUPTED, RunPhase.CANCELLED)
+            ) onPrice else onRefresh, onCancel, onResume, canStart)
         }
     }
 
@@ -134,6 +145,7 @@ private fun CardActions(
     onRefresh: () -> Unit,
     onCancel: () -> Unit,
     onResume: () -> Unit,
+    canStart: Boolean,
 ) {
     // NEEDS_USER 不算忙碌：设备读取已经返回，要同时给出接管和取消。忙碌时只能取消。
     when {
@@ -141,10 +153,10 @@ private fun CardActions(
             Text("取消运行")
         }
         phase == RunPhase.NEEDS_USER -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onResume, Modifier.weight(1f).testTag("resume_$id")) { Text("重新核验") }
+            Button(onResume, Modifier.weight(1f).testTag("resume_$id"), enabled = canStart) { Text("重新核验") }
             TextButton(onCancel, Modifier.testTag("cancel_$id")) { Text("取消") }
         }
-        else -> FilledTonalButton(onRefresh, Modifier.fillMaxWidth().testTag("refresh_$id")) {
+        else -> FilledTonalButton(onRefresh, Modifier.fillMaxWidth().testTag("refresh_$id"), enabled = canStart) {
             Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp))
             Text(if (phase == RunPhase.FAILED || phase == RunPhase.INTERRUPTED) "重新运行" else "刷新卡片", Modifier.padding(start = 6.dp))
         }
