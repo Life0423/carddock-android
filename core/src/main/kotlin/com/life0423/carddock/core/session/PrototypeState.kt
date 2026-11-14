@@ -22,6 +22,8 @@ data class CreationDraft(
     val message: String = "",
     val orderNumber: String = "",
     val modelCandidate: Boolean = false,
+    val ruleChangeCard: CardRecord? = null,
+    val rollingBackRule: Boolean = false,
 )
 
 /**
@@ -66,5 +68,6 @@ data class PrototypeActions(
     val refreshSequence: (List<String>) -> Unit = {},
     val advanceSequence: () -> Unit = {},
     val cancelSequence: () -> Unit = {},
+    val changeCardRule: (String, Boolean) -> Unit = { _, _ -> },
 
 )

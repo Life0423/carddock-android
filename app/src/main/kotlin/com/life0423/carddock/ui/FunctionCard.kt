@@ -52,6 +52,8 @@ internal fun FunctionCard(
     onDelete: () -> Unit,
     onPrice: (() -> Unit)? = null,
     canStart: Boolean = true,
+    onReplaceRule: (() -> Unit)? = null,
+    onRollbackRule: (() -> Unit)? = null,
 ) {
     val phase = card.run?.phase ?: if (card.snapshot == null) RunPhase.IDLE else RunPhase.SUCCEEDED
     // 按卡片 id 记住。列表复用到另一张卡时丢掉上一张的删除确认。
@@ -75,6 +77,14 @@ internal fun FunctionCard(
                         Icon(DockIcons.MoreHoriz, contentDescription = "${card.title}的更多操作", tint = DockColors.Muted)
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        if (onReplaceRule != null) DropdownMenuItem(
+                            text = { Text("替换菜鸟规则") }, enabled = canStart && !phase.isBusy(),
+                            onClick = { menuOpen = false; onReplaceRule() },
+                        )
+                        if (onRollbackRule != null) DropdownMenuItem(
+                            text = { Text("回退菜鸟规则") }, enabled = canStart && !phase.isBusy(),
+                            onClick = { menuOpen = false; onRollbackRule() },
+                        )
                         DropdownMenuItem(
                             text = { Text("移除卡片") },
                             onClick = { menuOpen = false; confirmDelete = true },

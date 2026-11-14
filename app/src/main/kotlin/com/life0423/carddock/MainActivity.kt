@@ -14,6 +14,11 @@ import com.life0423.carddock.ui.CardDockApp
  * 背景固定是暗色，系统栏用 SystemBarStyle.dark，图标才是浅色。
  */
 class MainActivity : ComponentActivity() {
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        (application as CardDockApplication).container.dockWindowFocused = hasFocus
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(

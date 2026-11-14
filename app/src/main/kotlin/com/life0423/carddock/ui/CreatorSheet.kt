@@ -70,7 +70,9 @@ internal fun CreatorSheet(
         Column(
             Modifier.fillMaxWidth().heightIn(max = screenHeight * 0.87f).imePadding(),
         ) {
-            CreatorHeader(actions.closeCreator)
+            val changingRule = draft.ruleChangeCard != null
+            val ruleAction = if (draft.rollingBackRule) "回退菜鸟规则" else "替换菜鸟规则"
+            CreatorHeader(actions.closeCreator, if (changingRule) ruleAction else "创建功能卡")
             Column(
                 Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())
                     .testTag("creator_sheet")
@@ -78,11 +80,12 @@ internal fun CreatorSheet(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Text(
-                    "描述想放进空间的功能，试运行并核验结果后再保存。选择下方模板开始。",
+                    if (changingRule) "${draft.title} · ${draft.template?.rule?.id.orEmpty()}。试运行通过后确认。"
+                    else "描述想放进空间的功能，试运行并核验结果后再保存。选择下方模板开始。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = DockColors.Muted,
                 )
-                if (!draft.modelCandidate) OutlinedTextField(
+                if (!draft.modelCandidate && !changingRule) OutlinedTextField(
                     value = draft.prompt,
                     onValueChange = actions.changePrompt,
                     enabled = !busy,
@@ -93,7 +96,7 @@ internal fun CreatorSheet(
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth().testTag("creator_prompt"),
                 )
-                if (!draft.modelCandidate) Row(
+                if (!draft.modelCandidate && !changingRule) Row(
                     Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -124,7 +127,7 @@ internal fun CreatorSheet(
                         Text("核对取包裹页面 → 读取待取状态 → 检查状态非空")
                     }
                 }
-                OutlinedTextField(
+                if (!changingRule) OutlinedTextField(
                     value = draft.title,
                     onValueChange = actions.changeTitle,
                     enabled = !busy,
@@ -191,10 +194,14 @@ internal fun CreatorSheet(
                     enabled = canSave,
                     modifier = Modifier.fillMaxWidth().testTag("creator_save"),
                 ) {
-                    Text("确认，保存到空间")
+                    Text(if (changingRule) "确认$ruleAction" else "确认，保存到空间")
                 }
                 Text(
-                    if (canSave) "保存后，刷新会直接运行已核验的规则。" else "试运行通过后，才能把卡片加入空间。",
+                    when {
+                        canSave -> "确认后，刷新会直接运行已核验的规则。"
+                        changingRule -> "试运行通过后可确认${if (draft.rollingBackRule) "回退" else "替换"}。"
+                        else -> "试运行通过后，才能把卡片加入空间。"
+                    },
                     color = DockColors.Muted,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -204,13 +211,13 @@ internal fun CreatorSheet(
 }
 
 @Composable
-private fun CreatorHeader(onClose: () -> Unit) {
+private fun CreatorHeader(onClose: () -> Unit, title: String) {
     Row(
         Modifier.padding(start = 22.dp, end = 22.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "创建功能卡",
+            title,
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.weight(1f),

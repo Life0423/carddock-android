@@ -42,25 +42,31 @@ class NativeSourcesTest {
     @Test fun meituanUsesActualNumberAndRequiresTime() = runTest {
         val sample = "0001234567890123456"
         fun row(parent: Int, label: String = "", id: String? = null) = DetailNode(parent, id, null, label, true)
-        val nodes = listOf(
-            row(-1, id = "$MEITUAN_PACKAGE:id/ifs"),
-            row(0, id = "$MEITUAN_PACKAGE:id/r19"), row(1, "订单已完成"),
-            row(0), row(3, "订单信息"),
-            row(3), row(5, "订单号码"), row(5, sample),
-            row(3), row(8, "下单时间"), row(8, "2026-01-02 12:34:56"),
-        )
-        var window = DetailWindow(MEITUAN_PACKAGE, nodes, false)
+        var window = DetailWindow(MEITUAN_PACKAGE, emptyList(), false)
         val meituan = MeituanGateway({ true }, { window })
         val engine = RuleEngine(object : DeviceGateway {
             override suspend fun inspect(sourceId: String, targetKey: String) = meituan.inspect()
         })
         val rule = meituanTemplate.rule
-        val good = engine.execute(rule, ReadOptions(LocalTarget(sample))) as EngineResult.Success
-        assertEquals(listOf("订单已完成", "2026-01-02 12:34:56"), good.snapshot.fields.map { it.value })
-        assertEquals("TARGET_MISMATCH",
-            (engine.execute(rule, ReadOptions(LocalTarget("0001234567890123457"))) as EngineResult.Failure).code)
-        window = window.copy(nodes = nodes.dropLast(1))
-        assertTrue(engine.execute(rule, ReadOptions(LocalTarget(sample))) is EngineResult.NeedsUser)
+        for ((root, header, list) in listOf(Triple("ifs", "r19", null), Triple("ii7", "sur", "kr1"))) {
+            val nodes = listOf(
+                row(-1, id = "$MEITUAN_PACKAGE:id/$root").copy(visible = list == null),
+                row(0, id = "$MEITUAN_PACKAGE:id/$header").copy(visible = list == null), row(1, "订单已完成"),
+                row(0, id = list?.let { "$MEITUAN_PACKAGE:id/$it" }),
+                row(3), row(4, "订单信息"),
+                row(4), row(6, "订单号码"), row(6, sample),
+                row(4), row(9, "下单时间"), row(9, "2026-01-02 12:34:56"),
+            )
+            window = window.copy(nodes = nodes)
+            val good = engine.execute(rule, ReadOptions(LocalTarget(sample))) as EngineResult.Success
+            assertEquals(listOf("订单已完成", "2026-01-02 12:34:56"), good.snapshot.fields.map { it.value })
+            assertEquals("TARGET_MISMATCH",
+                (engine.execute(rule, ReadOptions(LocalTarget("0001234567890123457"))) as EngineResult.Failure).code)
+            window = window.copy(nodes = nodes.dropLast(1))
+            assertTrue(engine.execute(rule, ReadOptions(LocalTarget(sample))) is EngineResult.NeedsUser)
+            window = window.copy(nodes = nodes.mapIndexed { index, node -> if (index == 9) node.copy(parent = 3) else node })
+            assertTrue(engine.execute(rule, ReadOptions(LocalTarget(sample))) is EngineResult.NeedsUser)
+        }
     }
 
     @Test fun jdRejectsWrongSkuVariantAndMissingName() {
@@ -77,39 +83,50 @@ class NativeSourcesTest {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test fun appPriceRequiresFreshMatchingShareAndDetailAfterShare() = runTest {
-        val product = JdProduct.A
+        val product = JdProduct.B
         val dock = "carddock"
         fun node(parent: Int, label: String = "", role: String? = null, id: String? = null) =
             DetailNode(parent, id, role, label, true)
         val detail = DetailWindow(JD_PACKAGE, listOf(
             node(-1, id = "com.jd.lib.productdetail.feature:id/a6c"),
-            node(0, "已选中款式 " + product.variant, "android.widget.Button"),
+            node(0, "已选中款式 " + product.appVariant, "android.widget.Button"),
             node(0, product.titlePrefix + " 显示器", "android.widget.TextView"),
-            node(0), node(3), node(4), node(5, "3764元，到手价", "android.view.ViewGroup"),
-            node(3, "满3000已减535"),
+            node(0), node(3), node(4), node(5, "7499元，同款低价", "android.view.ViewGroup"),
+            node(3, "已直降500元"),
         ), false)
         val share = DetailWindow(JD_PACKAGE, listOf(node(-1, "复制链接")), false)
         val returned = DetailWindow(dock, emptyList(), false)
-        suspend fun attempt(copiedAt: Long, matches: Boolean, seeDetailAfterCopy: Boolean): DeviceResponse {
+        suspend fun attempt(
+            copiedAt: Long,
+            matches: Boolean,
+            seeDetailAfterCopy: Boolean,
+            returnWindow: DetailWindow? = returned,
+            dockFocused: Boolean = false,
+        ): DeviceResponse {
             val start = testScheduler.currentTime + 100
             val gateway = JdGateway(dock, { ShareClip("测试链接", start + copiedAt) }, { true }, {
                 when (100 + testScheduler.currentTime - start) {
                     in 0..199 -> detail
                     in 200..399 -> share
                     in 400..599 -> if (seeDetailAfterCopy) detail else share
-                    else -> returned
+                    else -> returnWindow
                 }
             }, { 100 + testScheduler.currentTime }, { _, _ -> matches }, {
-                """window._itemOnly = ({"item":{"skuId":"${product.sku}","skuName":"显示器","newColorSize":[{"skuId":"${product.sku}","1":"${product.variant}"}]}});"""
-            })
+                val variantJson = kotlinx.serialization.json.JsonPrimitive(product.variant)
+                """window._itemOnly = ({"item":{"skuId":"${product.sku}","skuName":"显示器","newColorSize":[{"skuId":"${product.sku}","1":$variantJson}]}});"""
+            }, dockWindowFocused = { dockFocused })
             return gateway.inspect(product.sku, appPrice = true, requestedAt = start)
         }
         val good = attempt(300, matches = true, seeDetailAfterCopy = true) as DeviceResponse.Ready
-        assertEquals("3764", good.snapshot.appPrice?.amount)
-        assertEquals("满3000已减535", good.snapshot.appPrice?.discount)
+        assertEquals("7499", good.snapshot.appPrice?.amount)
+        assertEquals("同款低价", good.snapshot.appPrice?.label)
+        assertEquals("已直降500元", good.snapshot.appPrice?.discount)
+        assertEquals(product.variant, good.snapshot.appPrice?.variant)
         assertTrue(attempt(100, matches = true, seeDetailAfterCopy = true) is DeviceResponse.NeedsUser)
         assertTrue(attempt(300, matches = false, seeDetailAfterCopy = true) is DeviceResponse.Failed)
         assertTrue(attempt(300, matches = true, seeDetailAfterCopy = false) is DeviceResponse.NeedsUser)
+        assertTrue(attempt(300, true, true, returnWindow = null, dockFocused = true) is DeviceResponse.Ready)
+        assertTrue(attempt(300, true, true, returnWindow = null) is DeviceResponse.NeedsUser)
     }
 
     @Test fun shoppingRestoresSavedBaselineAndRequiresNewComparablePrice() = runTest {

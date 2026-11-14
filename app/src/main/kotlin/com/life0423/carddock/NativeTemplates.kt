@@ -1,6 +1,7 @@
 package com.life0423.carddock
 
 import com.life0423.carddock.core.model.TemplateDefinition
+import com.life0423.carddock.core.model.CardRecord
 import com.life0423.carddock.core.model.TemplateKind
 import com.life0423.carddock.core.rule.RuleSpec
 import com.life0423.carddock.core.rule.RuleStep
@@ -24,10 +25,24 @@ val cainiaoEmptyTemplate = TemplateDefinition(
     ),
 )
 
+/** 替换在内置规则与最近保存的菜鸟候选之间切换，回退使用这张卡自己的上一版。 */
+internal fun cainiaoRuleChange(card: CardRecord, savedCards: List<CardRecord>, rollback: Boolean): TemplateDefinition? {
+    val baseline = cainiaoEmptyTemplate.rule
+    if (card.rule.sourceId != baseline.sourceId || card.rule.targetKey != baseline.targetKey) return null
+    val selected = when {
+        rollback -> card.previousRule
+        card.rule != baseline -> baseline
+        else -> savedCards.lastOrNull {
+            it.rule.sourceId == baseline.sourceId && it.rule.targetKey == baseline.targetKey && it.rule != baseline
+        }?.rule
+    }
+    return selected?.let { cainiaoEmptyTemplate.copy(rule = it) }
+}
+
 /** 固定模板只定义公开字段；订单号码在试运行时单独输入。 */
 internal val meituanTemplate = TemplateDefinition(
     id = "meituan-history", title = "美团历史订单", kind = TemplateKind.DELIVERY,
-    description = "填写本机订单号码，开始后手动打开已完成订单并展开订单信息。",
+    description = "先在美团展开已完成订单的订单信息并复制号码。填写后开始试运行，从最近任务切回美团。",
     examplePrompt = "核验美团历史订单",
     rule = nativeRule("meituan-history-v1", MEITUAN_PACKAGE, MEITUAN_TARGET,
         "status" to "订单状态", "orderTime" to "下单时间"),

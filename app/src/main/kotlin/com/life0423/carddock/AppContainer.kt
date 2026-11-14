@@ -31,6 +31,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 
 /**
@@ -46,7 +47,8 @@ class AppContainer(context: Context) {
     private val device = DemoDeviceGateway()
     private val nativeDevice = CainiaoDeviceGateway()
     private val meituan = MeituanGateway()
-    private val jd = JdGateway(context)
+    internal var dockWindowFocused = false
+    private val jd = JdGateway(context) { dockWindowFocused }
     private val templates = TemplateCatalog.templates + listOf(cainiaoEmptyTemplate, meituanTemplate) + jdTemplates
     private val modelSettings = ModelSettings(context)
     private val shoppingStore = ShoppingStore(context)
@@ -55,7 +57,7 @@ class AppContainer(context: Context) {
     private val routedDevice = object : DeviceGateway {
         override fun instruction(sourceId: String, options: ReadOptions): String = when {
             options.appPrice -> "60 秒内切到京东匹配详情。打开分享，停一秒再复制链接，等详情恢复后返回卡坞。"
-            sourceId == MEITUAN_PACKAGE -> "请在 25 秒内切到美团订单详情，展开“订单信息”。"
+            sourceId == MEITUAN_PACKAGE -> "请在 25 秒内从最近任务切回美团，打开对应已完成订单并展开“订单信息”。"
             sourceId == cainiaoEmptyTemplate.rule.sourceId -> "请在 20 秒内切到菜鸟“取包裹”页。"
             else -> "正在读取页面"
         }
@@ -64,9 +66,10 @@ class AppContainer(context: Context) {
             inspect(sourceId, targetKey, ReadOptions())
 
         override suspend fun inspect(sourceId: String, targetKey: String, options: ReadOptions): DeviceResponse = when (sourceId) {
-            cainiaoEmptyTemplate.rule.sourceId -> nativeDevice.inspect(sourceId, targetKey)
+            cainiaoEmptyTemplate.rule.sourceId -> withContext(Dispatchers.IO) { nativeDevice.inspect(sourceId, targetKey) }
             MEITUAN_PACKAGE -> if (targetKey == meituanTemplate.rule.targetKey && options.localTarget != null) {
-                meituan.inspect()
+                // 页面树读取会同步查询系统服务，放到后台以便界面继续响应触摸。
+                withContext(Dispatchers.IO) { meituan.inspect() }
             } else DeviceResponse.Failed("此卡片缺少本机授权订单号码，请重新创建。")
             JD_PACKAGE -> jd.inspect(targetKey, options.appPrice, options.requestedAt)
             else -> device.inspect(sourceId, targetKey)
@@ -83,6 +86,7 @@ class AppContainer(context: Context) {
         setDeviceScenario = device::setScenario,
         modelCompiler = CainiaoModelCompiler(modelSettings),
         needsManualSequenceStart = { it.rule.sourceId in setOf(cainiaoEmptyTemplate.rule.sourceId, MEITUAN_PACKAGE) },
+        replacementTemplate = ::cainiaoRuleChange,
     )
 
     // 不阻塞构造。读成功才发布磁盘或种子；读失败则结束 loading，集合为空且不可写。

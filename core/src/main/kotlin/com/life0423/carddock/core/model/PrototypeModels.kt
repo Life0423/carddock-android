@@ -91,6 +91,7 @@ data class CardRecord(
     val localTarget: LocalTarget? = null,
     val appPrice: AppPrice? = null,
     val priceVerificationFailed: Boolean = false,
+    val previousRule: RuleSpec? = null,
 )
 
 /** 一条可试运行的演示模板。examplePrompt 只负责预填，编译器仍按用户最终输入分流，不按模板 id。 */

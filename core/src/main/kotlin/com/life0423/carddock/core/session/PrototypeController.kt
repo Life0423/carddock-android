@@ -37,6 +37,7 @@ class PrototypeController(
     newId: () -> String = { UUID.randomUUID().toString() },
     modelCompiler: RuleCompiler? = null,
     private val needsManualSequenceStart: (CardRecord) -> Boolean = { false },
+    private val replacementTemplate: ((CardRecord, List<CardRecord>, Boolean) -> TemplateDefinition?)? = null,
 ) {
     private val notice = MutableStateFlow<String?>(null)
     private val scenario = MutableStateFlow(DemoScenario.NORMAL)
@@ -73,6 +74,13 @@ class PrototypeController(
         closeCreator = creator::close,
         changeOrderNumber = creator::changeOrderNumber,
         generateCandidate = { creator.trial(generate = true) },
+        changeCardRule = { id, rollback ->
+            if (!resetting && sequence.value == null && !runs.hasLiveJob(id)) {
+                val card = cards.find(id)
+                val template = card?.let { replacementTemplate?.invoke(it, cards.state.value.cards, rollback) }
+                if (card != null && template != null) creator.openRuleChange(card, template, rollback)
+            }
+        },
         verifyPrice = { if (!resetting && sequence.value == null) runs.start(it, appPrice = true) },
         refreshSequence = ::refreshSequence,
         advanceSequence = { nextItem?.complete(Unit) },

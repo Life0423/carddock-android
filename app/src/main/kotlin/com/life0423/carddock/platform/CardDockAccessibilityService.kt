@@ -88,6 +88,7 @@ class CardDockAccessibilityService : AccessibilityService() {
     }
 
     companion object {
+        @Volatile
         internal var instance: CardDockAccessibilityService? = null
             private set
     }

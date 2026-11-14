@@ -12,6 +12,7 @@ import com.life0423.carddock.core.port.DeviceGateway
 import com.life0423.carddock.core.port.DeviceResponse
 import com.life0423.carddock.core.port.DeviceSnapshot
 import com.life0423.carddock.core.port.ReadOptions
+import com.life0423.carddock.core.port.orderIdentity
 import com.life0423.carddock.core.rule.RuleSpec
 import com.life0423.carddock.core.rule.RuleStep
 import com.life0423.carddock.core.testing.FixedCompiler
@@ -26,6 +27,92 @@ import org.junit.Test
 /** 顺序核验、展示价独立保存以及模型候选刷新走同一个生产控制器。 */
 @OptIn(ExperimentalCoroutinesApi::class)
 class NativeSequenceTest {
+    @Test fun ruleReplacementAndRollbackRequireSuccessfulTrialAndPreserveCard() = runTest {
+        val baseline = RuleSpec(id = "baseline", sourceId = "source", targetKey = "target", steps = listOf(
+            RuleStep.AssertTarget("target"), RuleStep.ReadField("status", "status", "状态"),
+        ))
+        val candidate = baseline.copy(id = "candidate")
+        val template = TemplateDefinition("t", "菜鸟", "", TemplateKind.EXPRESS, "核验菜鸟", baseline)
+        val card = CardRecord("existing", "我的菜鸟", TemplateKind.EXPRESS, baseline)
+        val neighbor = card.copy(id = "neighbor")
+        val store = MemoryCardStore(listOf(neighbor, card))
+        var readable = false
+        val gateway = object : DeviceGateway {
+            override suspend fun inspect(sourceId: String, targetKey: String) = if (readable) {
+                DeviceResponse.Ready(DeviceSnapshot(sourceId, targetKey, mapOf("status" to "空")))
+            } else DeviceResponse.NeedsUser("请打开取包裹页")
+        }
+        val controller = PrototypeController(store, FixedCompiler(template), RuleEngine(gateway),
+            listOf(template), backgroundScope, replacementTemplate = { existing, _, rollback ->
+                (if (rollback) existing.previousRule else candidate)?.let { template.copy(rule = it) }
+            })
+        controller.initialize()
+        runCurrent()
+        val actions = controller.actions
+        actions.changeCardRule(card.id, false)
+        actions.saveDraft()
+        actions.trialDraft()
+        runCurrent()
+        actions.saveDraft()
+        assertEquals(listOf(neighbor, card), store.disk)
+        readable = true
+        actions.trialDraft()
+        runCurrent()
+        actions.saveDraft()
+        runCurrent()
+        val replaced = store.disk!!.last()
+        assertEquals(listOf(neighbor.id, card.id), store.disk!!.map { it.id })
+        assertEquals(card.title, replaced.title)
+        assertEquals(candidate, replaced.rule)
+        assertEquals(baseline, replaced.previousRule)
+        actions.changeCardRule(card.id, true)
+        actions.saveDraft()
+        assertEquals(replaced, store.disk!!.last())
+        actions.trialDraft()
+        runCurrent()
+        actions.saveDraft()
+        runCurrent()
+        assertEquals(baseline, store.disk!!.last().rule)
+        assertEquals(candidate, store.disk!!.last().previousRule)
+        assertEquals(RunPhase.SUCCEEDED, store.disk!!.last().run?.phase)
+    }
+
+    @Test fun pastedOrderNumberUsesSameNormalizedIdentityForTrialAndSave() = runTest {
+        val number = "1234567890123456789"
+        val rule = RuleSpec(id = "order", sourceId = "source", targetKey = "target", steps = listOf(
+            RuleStep.AssertTarget("target"), RuleStep.ReadField("status", "status", "状态"),
+        ))
+        val template = TemplateDefinition("t", "订单", "", TemplateKind.DELIVERY, "核验订单", rule,
+            requiresOrderNumber = true)
+        val store = MemoryCardStore(emptyList())
+        var reads = 0
+        val controller = PrototypeController(store, FixedCompiler(template), RuleEngine(object : DeviceGateway {
+            override suspend fun inspect(sourceId: String, targetKey: String): DeviceResponse {
+                reads++
+                return DeviceResponse.Ready(DeviceSnapshot(sourceId, orderIdentity(number), mapOf("status" to "已完成")))
+            }
+        }), listOf(template), backgroundScope)
+        controller.initialize()
+        runCurrent()
+        controller.actions.openCreator(template)
+        val actions = controller.actions
+        for (invalid in listOf("订单号码：$number", "1".repeat(31))) {
+            actions.changeOrderNumber(invalid)
+            actions.trialDraft()
+            runCurrent()
+            assertEquals(RunPhase.FAILED, controller.state.value.draft?.phase)
+        }
+        assertEquals(0, reads)
+        actions.changeOrderNumber(" １２３\u200E456 7890123456789\n")
+        actions.trialDraft()
+        runCurrent()
+        assertEquals(RunPhase.SUCCEEDED, controller.state.value.draft?.phase)
+        assertEquals(1, reads)
+        actions.saveDraft()
+        runCurrent()
+        assertEquals(number, store.disk!!.single().localTarget?.orderNumber)
+    }
+
     @Test fun sequentialReadsWaitForUserAndPreservePriceAcrossPublicRefresh() = runTest {
         val price = AppPrice("10", "CNY", "规格", "到手价", null, 23)
         fun rule(key: String) = RuleSpec(id = key, sourceId = key, targetKey = key, steps = listOf(

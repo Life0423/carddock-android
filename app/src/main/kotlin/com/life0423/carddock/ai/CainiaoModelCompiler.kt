@@ -59,8 +59,9 @@ internal class CainiaoModelCompiler(private val settings: ModelSettings) : RuleC
             }
             try {
                 connection.outputStream.use { it.write(body.toString().encodeToByteArray()) }
-                if (connection.responseCode !in 200..299) {
-                    return@withContext CompileResult.Unsupported("模型服务未接受请求，请检查配置。")
+                val status = connection.responseCode
+                if (status !in 200..299) {
+                    return@withContext CompileResult.Unsupported("模型服务返回 HTTP $status，请检查配置。")
                 }
                 val response = connection.inputStream.bufferedReader().use { it.readBounded(32 * 1024) }
                 val root = Json.parseToJsonElement(response) as? JsonObject

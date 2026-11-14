@@ -17,9 +17,9 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
 
-internal enum class JdProduct(val sku: String, val variant: String, val titlePrefix: String) {
+internal enum class JdProduct(val sku: String, val variant: String, val titlePrefix: String, val appVariant: String = variant) {
     A("100305104289", "GX 27款/27/黑曜屏/2304分区", "海信GX 27款"),
-    B("100312915069", "爆27\" 4K 240Hz双模DP2.1/OLED", "华硕ROG 超神27 二代PG27UCWM");
+    B("100312915069", "爆27\" 4K 240Hz双模DP2.1/OLED", "华硕ROG 超神27 二代PG27UCWM", "爆27\" 4K 240Hz双模");
 
     val title get() = "京东商品 $name"
     val publicUri get() = URI("https://item.m.jd.com/product/$sku.html")
@@ -45,13 +45,14 @@ internal class JdGateway(
     private val now: () -> Long = System::currentTimeMillis,
     private val matchesShare: (String, JdProduct) -> Boolean = ::matchesJdShare,
     private val readPage: (URI) -> String = ::readPublicJdPage,
+    private val dockWindowFocused: () -> Boolean = { false },
 ) {
-    constructor(context: Context) : this(context.packageName, {
+    constructor(context: Context, dockWindowFocused: () -> Boolean) : this(context.packageName, {
         val clipboard = context.getSystemService(ClipboardManager::class.java)
         val clip = clipboard.primaryClip
         if (clip == null || clip.itemCount != 1) null
         else clip.getItemAt(0).text?.toString()?.let { ShareClip(it, clip.description.timestamp) }
-    })
+    }, dockWindowFocused = dockWindowFocused)
 
     suspend fun inspect(target: String, appPrice: Boolean, requestedAt: Long?): DeviceResponse {
         val product = JdProduct.entries.firstOrNull { it.sku == target }
@@ -66,7 +67,8 @@ internal class JdGateway(
                 if (captured != null && !matchesShare(captured.share, product)) {
                     return@withContext DeviceResponse.Failed("分享链接与指定商品不匹配，未更新展示价。")
                 }
-                verifyJdPage(readPage(product.publicUri), product, captured?.price)
+                // 链接和公开页均核验同一 SKU 后，保存对应的完整规格。
+                verifyJdPage(readPage(product.publicUri), product, captured?.price?.copy(variant = product.variant))
             } catch (_: IOException) {
                 DeviceResponse.Failed("京东公开页连接失败，请稍后重试。")
             }
@@ -85,7 +87,8 @@ internal class JdGateway(
                     val shareVisible = page.nodes.any { it.visible && it.label == "复制链接" }
                     val prior = evidence
                     evidence = when {
-                        detail != null && (detail.variant != product.variant || !detail.title.startsWith(product.titlePrefix)) -> null
+                        detail != null && (detail.variant != product.variant && detail.variant != product.appVariant ||
+                            !detail.title.startsWith(product.titlePrefix)) -> null
                         shareVisible && prior != null ->
                             prior.copy(shareSeenAt = prior.shareSeenAt ?: sampleTime, afterShare = null)
                         detail?.price != null && prior?.shareSeenAt != null && detail.title == prior.title &&
@@ -95,10 +98,11 @@ internal class JdGateway(
                         else -> null
                     }
                 }
-                dockPackage -> {
+                dockPackage, null -> {
+                    // vivo 返回卡坞时可能不给无障碍根节点，此时用 Activity 的窗口焦点确认返回。
                     val price = evidence?.afterShare
                     val shareSeenAt = evidence?.shareSeenAt
-                    if (price != null && shareSeenAt != null) readClip()?.let { clip ->
+                    if ((page != null || dockWindowFocused()) && price != null && shareSeenAt != null) readClip()?.let { clip ->
                         if (clip.copiedAt >= maxOf(startedAt, shareSeenAt) && clip.copiedAt <= price.verifiedAt) {
                             return@withTimeoutOrNull CapturedPrice(price, clip.text)
                         }

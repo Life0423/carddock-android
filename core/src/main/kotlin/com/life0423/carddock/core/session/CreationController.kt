@@ -52,6 +52,14 @@ internal class CreationController(
         )
     }
 
+    /** 从已保存的菜鸟规则打开草稿，原卡在确认保存前继续使用旧规则。 */
+    fun openRuleChange(card: CardRecord, template: TemplateDefinition, rollback: Boolean) {
+        open(template)
+        mutableDraft.value = checkNotNull(draft.value).copy(
+            title = card.title, ruleChangeCard = card, rollingBackRule = rollback,
+        )
+    }
+
     /** 代际加一并取消任务，然后丢掉草稿。已经进集合提交段的保存仍可能写完，但不会再改当前草稿。 */
     fun close() {
         generation += 1
@@ -63,7 +71,7 @@ internal class CreationController(
     /** 提示词参与分流，所以改动会废除已编译模板和预览。长度在这里截断，界面不再做第二道校验。 */
     fun changePrompt(prompt: String) {
         val current = draft.value ?: return
-        if (current.phase.isBusy()) return
+        if (current.phase.isBusy() || current.ruleChangeCard != null) return
         mutableDraft.value = current.copy(
             prompt = prompt.take(500),
             orderNumber = "",
@@ -74,11 +82,21 @@ internal class CreationController(
         )
     }
 
-    /** 修改本机订单号后必须重新试运行。 */
+    /** 在录入时统一数字格式，试运行和保存使用同一个号码。 */
     fun changeOrderNumber(value: String) {
         val current = draft.value ?: return
-        if (!current.phase.isBusy()) mutableDraft.value = current.copy(
-            orderNumber = value.take(30), phase = RunPhase.IDLE, preview = null, message = "",
+        if (current.phase.isBusy()) return
+        val number = buildString(value.length) {
+            for (character in value) {
+                when {
+                    character.isWhitespace() || character.category == CharCategory.FORMAT -> Unit
+                    character in '０'..'９' -> append('0' + (character - '０'))
+                    else -> append(character)
+                }
+            }
+        }
+        mutableDraft.value = current.copy(
+            orderNumber = number, phase = RunPhase.IDLE, preview = null, message = "",
         )
     }
 
@@ -105,7 +123,7 @@ internal class CreationController(
                 val compiled = when {
                     generate -> modelCompiler?.compile(current.prompt)
                         ?: CompileResult.Unsupported("请先在“我的”配置模型。")
-                    current.modelCandidate -> CompileResult.Success(checkNotNull(current.template))
+                    current.modelCandidate || current.ruleChangeCard != null -> CompileResult.Success(checkNotNull(current.template))
                     else -> compiler.compile(current.prompt.trim())
                 }
                 when (compiled) {
@@ -124,7 +142,7 @@ internal class CreationController(
                         }
                         val target = if (compiled.template.requiresOrderNumber) {
                             if (!current.orderNumber.matches(Regex("[0-9]{15,30}"))) {
-                                edit(token) { it.copy(phase = RunPhase.FAILED, message = "请输入完整订单号码（15–30 位数字）。") }
+                                edit(token) { it.copy(phase = RunPhase.FAILED, message = "请复制美团「订单信息」中的「订单号码」（15–30 位数字）。") }
                                 return@launch
                             }
                             LocalTarget(current.orderNumber)
@@ -173,34 +191,46 @@ internal class CreationController(
         val preview = current.preview ?: return
         val template = current.template ?: return
         if (current.phase != RunPhase.SUCCEEDED || current.title.isBlank() || work?.isActive == true) return
-        if (cards.state.value.cards.size >= MAX_CARDS) {
+        val original = current.ruleChangeCard
+        if (original == null && cards.state.value.cards.size >= MAX_CARDS) {
             notify("原型最多保存 $MAX_CARDS 张卡片，请先移除不需要的卡片。")
             return
         }
         val token = generation
         mutableDraft.value = current.copy(phase = RunPhase.RUNNING, message = "正在保存卡片…")
         work = scope.launch {
-            val card = CardRecord(
-                id = newId(), title = current.title.trim(), kind = template.kind,
-                rule = template.rule, snapshot = preview,
-                localTarget = current.orderNumber.takeIf { template.requiresOrderNumber }?.let(::LocalTarget),
-                run = RunInfo(
-                    id = newId(), phase = RunPhase.SUCCEEDED,
-                    message = "试运行已核验 · ${preview.sourceLabel}",
-                    currentStep = template.rule.steps.size, totalSteps = template.rule.steps.size,
-                    startedAt = preview.fetchedAt, endedAt = now(),
-                ),
+            val run = RunInfo(
+                id = newId(), phase = RunPhase.SUCCEEDED,
+                message = "试运行已核验 · ${preview.sourceLabel}",
+                currentStep = template.rule.steps.size, totalSteps = template.rule.steps.size,
+                startedAt = preview.fetchedAt, endedAt = now(),
             )
-            if (cards.update { it + card }) {
+            val card = original?.copy(rule = template.rule, previousRule = original.rule, snapshot = preview, run = run)
+                ?: CardRecord(
+                    id = newId(), title = current.title.trim(), kind = template.kind,
+                    rule = template.rule, snapshot = preview, run = run,
+                    localTarget = current.orderNumber.takeIf { template.requiresOrderNumber }?.let(::LocalTarget),
+                )
+            if (cards.update { existing ->
+                    if (original == null) existing + card
+                    else existing.map { stored -> if (stored == original) card else stored }
+                }) {
                 // 代际不符说明弹层已经关掉或重开过。卡片可以留下，但不能清掉新的草稿。
                 if (token == generation) {
                     generation += 1
                     mutableDraft.value = null
                 }
-                notify("“${card.title}”已加入空间")
+                notify(when {
+                    original == null -> "“${card.title}”已加入空间"
+                    current.rollingBackRule -> "菜鸟规则已回退"
+                    else -> "菜鸟规则已替换"
+                })
             } else {
                 // 写回的是保存前抓住的草稿，不是现在这份 RUNNING。阶段因此回到试运行成功，预览还在。
-                edit(token) { current.copy(message = "保存失败，预览仍保留，可以重试。") }
+                val message = if (original != null && cards.find(original.id) != original) {
+                    "卡片已变化，请关闭后重新试运行。"
+                } else "保存失败，预览仍保留，可以重试。"
+                edit(token) { current.copy(message = message) }
             }
         }
     }

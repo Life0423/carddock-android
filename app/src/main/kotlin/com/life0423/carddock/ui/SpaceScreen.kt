@@ -31,6 +31,7 @@ import com.life0423.carddock.core.model.CardRecord
 import com.life0423.carddock.core.session.PrototypeActions
 import com.life0423.carddock.core.session.SequenceStatus
 import com.life0423.carddock.platform.JD_PACKAGE
+import com.life0423.carddock.cainiaoRuleChange
 import com.life0423.carddock.ui.theme.DockColors
 
 /** 空间页只展示已保存的卡。空列表不出现“我的功能卡”标题，只留添加入口。 */
@@ -72,6 +73,12 @@ internal fun SpaceScreen(cards: List<CardRecord>, actions: PrototypeActions, seq
                         { actions.verifyPrice(card.id) }
                     } else null,
                     canStart = sequence == null,
+                    onReplaceRule = cainiaoRuleChange(card, cards, rollback = false)?.let {
+                        { actions.changeCardRule(card.id, false) }
+                    },
+                    onRollbackRule = cainiaoRuleChange(card, cards, rollback = true)?.let {
+                        { actions.changeCardRule(card.id, true) }
+                    },
                 )
             }
         }
