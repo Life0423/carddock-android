@@ -1,0 +1,47 @@
+{
+    "format": "carddock.skill",
+    "version": 1,
+    "title": "出行安排",
+    "rule": {
+        "schemaVersion": 1,
+        "id": "travel-overview",
+        "sourceId": "demo.travel",
+        "targetKey": "journey-demo-001",
+        "steps": [
+            {
+                "type": "assertTarget",
+                "expectedKey": "journey-demo-001"
+            },
+            {
+                "type": "readField",
+                "sourceField": "route",
+                "outputKey": "route",
+                "label": "行程路线"
+            },
+            {
+                "type": "requireField",
+                "outputKey": "route"
+            },
+            {
+                "type": "readField",
+                "sourceField": "departure",
+                "outputKey": "departure",
+                "label": "出发时间"
+            },
+            {
+                "type": "requireField",
+                "outputKey": "departure"
+            },
+            {
+                "type": "readField",
+                "sourceField": "gate",
+                "outputKey": "gate",
+                "label": "检票口"
+            },
+            {
+                "type": "requireField",
+                "outputKey": "gate"
+            }
+        ]
+    }
+}

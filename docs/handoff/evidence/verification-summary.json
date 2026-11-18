@@ -1,0 +1,31 @@
+{
+  "baseline_commit": "0d1a144",
+  "baseline_tests": {
+    "core": 47,
+    "android": 41
+  },
+  "final_tests": {
+    "core": {
+      "tests": 52,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "app": {
+      "tests": 46,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 18,
+    "new_warnings": 0
+  },
+  "device": "Pixel_8_Pro emulator API 34 arm64; no physical device",
+  "apk_sha256": "acb763c88347d5010c0e50474c0c6f25939f75f525f4bc0cb580a8d6e92dd173",
+  "apk_bytes": 11858692,
+  "apk_sha256_scope": "original local emulator acceptance APK",
+  "repository_build_apk_sha256": "11bfead8f87540fafe6bf01d61cf59a3a4ecd3e24e1d5b735bd8f12d2ee15da6"
+}
