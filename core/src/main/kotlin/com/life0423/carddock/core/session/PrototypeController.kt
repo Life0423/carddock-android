@@ -94,6 +94,7 @@ class PrototypeController(
         renameGroup = ::renameGroup,
         removeGroupMember = ::removeGroupMember,
         dissolveGroup = ::dissolveGroup,
+        trialPreparedTemplate = { creator.trial(it) },
     )
 
     /** 建组只收纳独立卡片，在最早被选卡位置插入有序成员，未选卡相对顺序不变。 */

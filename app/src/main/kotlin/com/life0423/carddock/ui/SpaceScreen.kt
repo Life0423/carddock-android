@@ -37,6 +37,7 @@ import com.life0423.carddock.core.model.TemplateKind
 import com.life0423.carddock.core.rule.RuleStep
 import com.life0423.carddock.core.session.PrototypeActions
 import com.life0423.carddock.core.session.PrototypeState
+import com.life0423.carddock.platform.MEITUAN_PACKAGE
 import com.life0423.carddock.ui.theme.DockColors
 
 /** 首页只保存筛选和路由；组关系、规则及执行状态全部来自控制器。详情覆盖列表以保留滚动位置。 */
@@ -155,7 +156,8 @@ private fun FeedTile(card: CardRecord, group: CompareGroup?, members: List<CardR
 private fun CardDetail(card: CardRecord, actions: PrototypeActions) {
     FunctionCard(card, { actions.refreshCard(card.id) }, { actions.cancelCard(card.id) }, { actions.resumeCard(card.id) }, { actions.deleteCard(card.id) })
     Text("结构化结果", style = MaterialTheme.typography.labelMedium, color = DockColors.Muted)
-    Text("规则 v${card.rule.schemaVersion} · ${card.rule.sourceId}\n目标：${card.rule.targetKey}", style = MaterialTheme.typography.bodySmall)
+    val targetLabel = if (card.rule.sourceId == MEITUAN_PACKAGE) "美团订单 · 尾号 ${card.rule.targetKey.takeLast(4)}" else card.rule.targetKey
+    Text("规则 v${card.rule.schemaVersion} · ${card.rule.sourceId}\n目标：$targetLabel", style = MaterialTheme.typography.bodySmall)
     if (card.originalPrompt.isNotBlank()) Text("创建需求：${card.originalPrompt}", style = MaterialTheme.typography.bodyMedium)
     card.rule.steps.forEach { step ->
         Text(when (step) {

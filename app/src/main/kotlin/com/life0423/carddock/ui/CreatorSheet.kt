@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -20,6 +21,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -30,17 +32,25 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.life0423.carddock.MEITUAN_HISTORY
 import com.life0423.carddock.core.model.RunPhase
 import com.life0423.carddock.core.model.TemplateDefinition
 import com.life0423.carddock.core.session.CreationDraft
 import com.life0423.carddock.core.session.PrototypeActions
+import com.life0423.carddock.meituanOrderTemplate
+import com.life0423.carddock.platform.MeituanOrderTarget
 import com.life0423.carddock.ui.theme.DockColors
 
 /**
@@ -59,6 +69,10 @@ internal fun CreatorSheet(
     val canSave = draft.phase == RunPhase.SUCCEEDED && draft.preview != null && draft.title.isNotBlank()
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val focusManager = LocalFocusManager.current
+    var meituanSelected by rememberSaveable { mutableStateOf(false) }
+    var route by rememberSaveable { mutableStateOf("") }
+    var orderNumber by rememberSaveable { mutableStateOf("") }
+    val order = if (meituanSelected) MeituanOrderTarget.parse(route, orderNumber) else null
     ModalBottomSheet(
         onDismissRequest = actions.closeCreator,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -74,32 +88,62 @@ internal fun CreatorSheet(
                     .padding(start = 22.dp, end = 22.dp, bottom = 26.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Text(
-                    "Mock 编译：目前支持演示取件、配送进度、出行，以及菜鸟空状态核验。选餐推荐尚未接入。",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = DockColors.Muted,
-                )
-                OutlinedTextField(
-                    value = draft.prompt,
-                    onValueChange = actions.changePrompt,
-                    enabled = !busy,
-                    label = { Text("我想要……") },
-                    placeholder = { Text("把待取快递放到我的空间") },
-                    minLines = 2,
-                    maxLines = 4,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth().testTag("creator_prompt"),
-                )
-                Row(
-                    Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    templates.forEach { template ->
-                        AssistChip(
-                            onClick = { actions.changePrompt(template.examplePrompt) },
-                            label = { Text(template.title) },
-                            enabled = !busy,
-                        )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(!meituanSelected, {
+                        if (meituanSelected) {
+                            meituanSelected = false
+                            actions.changePrompt("")
+                            if (draft.title == MEITUAN_HISTORY) actions.changeTitle("")
+                        }
+                    }, label = { Text("现有模板") }, enabled = !busy)
+                    FilterChip(meituanSelected, {
+                        if (!meituanSelected) {
+                            meituanSelected = true
+                            actions.changePrompt(MEITUAN_HISTORY)
+                            if (draft.title == draft.template?.title) actions.changeTitle("")
+                        }
+                    }, label = { Text(MEITUAN_HISTORY) }, enabled = !busy, modifier = Modifier.testTag("creator_meituan"))
+                }
+                if (meituanSelected) {
+                    Text("美团已完成的外卖订单。试运行会打开美团并核对订单号码。", color = DockColors.Muted,
+                        style = MaterialTheme.typography.bodyMedium)
+                    OutlinedTextField(route, { value ->
+                        route = value.take(32)
+                        actions.changePrompt(MEITUAN_HISTORY)
+                    }, enabled = !busy, singleLine = true, label = { Text("路由编号（19 位 oid）") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("meituan_route"))
+                    OutlinedTextField(orderNumber, { value ->
+                        orderNumber = value.take(48)
+                        actions.changePrompt(MEITUAN_HISTORY)
+                    }, enabled = !busy, singleLine = true, label = { Text("订单详情中的完整订单号码") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("meituan_number"))
+                } else {
+                    OutlinedTextField(
+                        value = draft.prompt,
+                        onValueChange = actions.changePrompt,
+                        enabled = !busy,
+                        label = { Text("我想要……") },
+                        placeholder = { Text("把待取快递放到我的空间") },
+                        minLines = 2,
+                        maxLines = 4,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("creator_prompt"),
+                    )
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        templates.forEach { template ->
+                            AssistChip(
+                                onClick = { actions.changePrompt(template.examplePrompt) },
+                                label = { Text(template.title) },
+                                enabled = !busy,
+                            )
+                        }
                     }
                 }
                 OutlinedTextField(
@@ -115,9 +159,10 @@ internal fun CreatorSheet(
                 FilledTonalButton(
                     onClick = {
                         focusManager.clearFocus()
-                        actions.trialDraft()
+                        if (meituanSelected) order?.let { actions.trialPreparedTemplate(meituanOrderTemplate(it)) }
+                        else actions.trialDraft()
                     },
-                    enabled = draft.prompt.isNotBlank() && !busy,
+                    enabled = !busy && (if (meituanSelected) order != null else draft.prompt.isNotBlank()),
                     modifier = Modifier.fillMaxWidth().testTag("creator_trial"),
                 ) {
                     if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)

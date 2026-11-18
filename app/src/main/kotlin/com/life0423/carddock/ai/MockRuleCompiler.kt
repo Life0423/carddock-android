@@ -24,8 +24,11 @@ class MockRuleCompiler(templates: List<TemplateDefinition>) : RuleCompiler {
         }
 
         // 选餐与配送是不同能力，不能把预算、口味需求静默落到配送演示。
-        if (listOf("午餐", "选餐", "推荐", "预算", "口味", "少辣", "评价", "美团", "元以内").any(request::contains)) {
-            return CompileResult.Unsupported("选餐推荐与美团真实读取尚未接入；当前外卖模板仅演示配送进度，不会执行预算或口味筛选。")
+        if ("美团" in request) {
+            return CompileResult.Unsupported("实时配送尚未接入。核验已完成的订单，请选择「美团历史订单」。")
+        }
+        if (listOf("午餐", "选餐", "推荐", "预算", "口味", "少辣", "评价", "元以内").any(request::contains)) {
+            return CompileResult.Unsupported("选餐推荐尚未接入。外卖演示模板可查看配送进度。")
         }
 
         // 真机请求只匹配已经核验的固定模板，不回退到模拟取件码。
