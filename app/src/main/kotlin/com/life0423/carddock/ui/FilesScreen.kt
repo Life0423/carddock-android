@@ -14,6 +14,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.life0423.carddock.core.model.CardRecord
 import com.life0423.carddock.core.rule.RuleSpec
+import com.life0423.carddock.platform.MEITUAN_PACKAGE
 import com.life0423.carddock.ui.theme.DockColors
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
@@ -62,10 +63,14 @@ internal fun FilesScreen(cards: List<CardRecord>) {
                     Text(card.title, style = MaterialTheme.typography.titleMedium)
                     Text("规则 v${card.rule.schemaVersion} · ${card.rule.sourceId}", style = MaterialTheme.typography.bodySmall, color = DockColors.Muted)
                 }
-                TextButton({
-                    pending = json.encodeToString(SkillExport(title = card.title, rule = card.rule))
-                    export.launch("carddock-skill.json")
-                }, enabled = pending == null) { Text("导出") }
+                if (card.rule.sourceId == MEITUAN_PACKAGE) {
+                    Text("仅本机", style = MaterialTheme.typography.bodySmall, color = DockColors.Muted)
+                } else {
+                    TextButton({
+                        pending = json.encodeToString(SkillExport(title = card.title, rule = card.rule))
+                        export.launch("carddock-skill.json")
+                    }, enabled = pending == null) { Text("导出") }
+                }
             }
         }
     }

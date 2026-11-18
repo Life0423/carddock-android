@@ -60,4 +60,5 @@ data class PrototypeActions(
     val renameGroup: (String, String) -> Unit = { _, _ -> },
     val removeGroupMember: (String, String) -> Unit = { _, _ -> },
     val dissolveGroup: (String) -> Unit = {},
+    val trialPreparedTemplate: (TemplateDefinition) -> Unit = {},
 )

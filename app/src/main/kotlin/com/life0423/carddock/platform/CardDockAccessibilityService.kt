@@ -5,7 +5,7 @@ import android.accessibilityservice.AccessibilityService
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
-/** 只在主动读取时观察当前窗口；事件回调不采集、不缓存页面。 */
+/** 用户主动运行卡片时才观察窗口；事件回调不采集、不缓存页面。 */
 class CardDockAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() { instance = this }
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
@@ -18,6 +18,12 @@ class CardDockAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         if (instance === this) instance = null
         super.onDestroy()
+    }
+
+    /** 仅用于确认跨应用前台交接，不读取节点文本。 */
+    @Suppress("DEPRECATION")
+    internal fun activePackage(): String? = rootInActiveWindow?.let { root ->
+        try { root.packageName?.toString() } finally { root.recycle() }
     }
 
     /** 单次观察结束即释放所有节点，密码节点仅记录存在性，不读取文本。 */

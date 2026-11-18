@@ -58,7 +58,7 @@ internal fun ProfileScreen(scenario: DemoScenario, actions: PrototypeActions, op
                     TextPill("CardDock · 原型", DockColors.Mint)
                     Text("你的卡片，保存在这台设备", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "演示模板读取模拟数据；菜鸟真机模板在你主动试运行或刷新时读取当前页面。页面内容不上传到模型服务。",
+                        "主动试运行或刷新时，卡坞读取你指定的页面。应用读取结果只保存在这台设备。",
                         style = MaterialTheme.typography.bodyMedium,
                         color = DockColors.Muted,
                     )
@@ -67,8 +67,8 @@ internal fun ProfileScreen(scenario: DemoScenario, actions: PrototypeActions, op
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("菜鸟页面读取", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("启用卡坞无障碍服务后，选择菜鸟真机模板。开始读取后 20 秒内手动切到菜鸟取包裹页，再返回卡坞查看结果。服务只在主动读取期间检查可见页面；可随时在系统设置关闭。", style = MaterialTheme.typography.bodyMedium, color = DockColors.Muted)
+                Text("应用页面读取", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("开启卡坞无障碍服务后，美团历史订单会在前台打开并核验。菜鸟仍需手动切到取包裹页。", style = MaterialTheme.typography.bodyMedium, color = DockColors.Muted)
                 OutlinedButton(onClick = openAccessibilitySettings, modifier = Modifier.fillMaxWidth().testTag("accessibility_settings")) { Text("打开无障碍设置") }
             }
         }

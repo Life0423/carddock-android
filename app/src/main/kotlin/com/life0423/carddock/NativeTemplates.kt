@@ -4,6 +4,8 @@ import com.life0423.carddock.core.model.TemplateDefinition
 import com.life0423.carddock.core.model.TemplateKind
 import com.life0423.carddock.core.rule.RuleSpec
 import com.life0423.carddock.core.rule.RuleStep
+import com.life0423.carddock.platform.MEITUAN_PACKAGE
+import com.life0423.carddock.platform.MeituanOrderTarget
 
 /** 首个真机模板仅证明明确空状态，不把未发现取件码当作没有包裹。 */
 val cainiaoEmptyTemplate = TemplateDefinition(
@@ -15,6 +17,22 @@ val cainiaoEmptyTemplate = TemplateDefinition(
         steps = listOf(
             RuleStep.AssertTarget("cainiao.pickup.empty"),
             RuleStep.ReadField("status", "status", "待取状态"),
+            RuleStep.RequireField("status"),
+        ),
+    ),
+)
+
+internal const val MEITUAN_HISTORY = "美团历史订单"
+
+/** 每张卡保存自己的订单绑定，确认前仍走同一个试运行通道。 */
+internal fun meituanOrderTemplate(order: MeituanOrderTarget) = TemplateDefinition(
+    id = "meituan-history", title = MEITUAN_HISTORY, kind = TemplateKind.DELIVERY,
+    description = "打开并核验一笔已完成的美团外卖订单。", examplePrompt = MEITUAN_HISTORY,
+    rule = RuleSpec(
+        id = "meituan-history-v1", sourceId = MEITUAN_PACKAGE, targetKey = order.key,
+        steps = listOf(
+            RuleStep.AssertTarget(order.key),
+            RuleStep.ReadField("status", "status", "订单状态"),
             RuleStep.RequireField("status"),
         ),
     ),

@@ -8,6 +8,8 @@ import com.life0423.carddock.data.AtomicFileCardStore
 import com.life0423.carddock.demo.DemoDeviceGateway
 import com.life0423.carddock.demo.TemplateCatalog
 import com.life0423.carddock.platform.CainiaoDeviceGateway
+import com.life0423.carddock.platform.MEITUAN_PACKAGE
+import com.life0423.carddock.platform.MeituanDeviceGateway
 import com.life0423.carddock.core.port.DeviceGateway
 import com.life0423.carddock.core.port.DeviceResponse
 import kotlinx.coroutines.CoroutineScope
@@ -28,11 +30,15 @@ class AppContainer(context: Context) {
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = false }
     private val device = DemoDeviceGateway()
     private val nativeDevice = CainiaoDeviceGateway()
+    private val meituanDevice = MeituanDeviceGateway(context.applicationContext)
     private val templates = TemplateCatalog.templates + cainiaoEmptyTemplate
     private val routedDevice = object : DeviceGateway {
         override suspend fun inspect(sourceId: String, targetKey: String): DeviceResponse =
-            if (sourceId == cainiaoEmptyTemplate.rule.sourceId) nativeDevice.inspect(sourceId, targetKey)
-            else device.inspect(sourceId, targetKey)
+            when (sourceId) {
+                cainiaoEmptyTemplate.rule.sourceId -> nativeDevice.inspect(sourceId, targetKey)
+                MEITUAN_PACKAGE -> meituanDevice.inspect(sourceId, targetKey)
+                else -> device.inspect(sourceId, targetKey)
+            }
     }
 
     val controller = PrototypeController(

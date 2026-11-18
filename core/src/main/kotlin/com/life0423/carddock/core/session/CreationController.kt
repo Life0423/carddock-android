@@ -75,18 +75,18 @@ internal class CreationController(
     }
 
     /** 已有仍活跃的试运行或保存时直接返回。取消收尾中 isActive 为 false，这道检查让开。空白提示词不改阶段。 */
-    fun trial() {
+    fun trial(preparedTemplate: TemplateDefinition? = null) {
         val current = draft.value ?: return
-        if (work?.isActive == true || current.prompt.isBlank()) return
+        if (work?.isActive == true || (preparedTemplate == null && current.prompt.isBlank())) return
         val token = generation
         mutableDraft.value = current.copy(
             phase = RunPhase.QUEUED, preview = null, template = null,
-            message = "正在匹配模板…",
+            message = if (preparedTemplate == null) "正在匹配模板…" else "等待设备操作通道",
         )
         work = scope.launch {
             try {
                 // 编译放在通道锁外，匹配模板时不堵住正在刷新的卡片。
-                when (val compiled = compiler.compile(current.prompt.trim())) {
+                when (val compiled = preparedTemplate?.let(CompileResult::Success) ?: compiler.compile(current.prompt.trim())) {
                     is CompileResult.Unsupported -> edit(token) {
                         it.copy(phase = RunPhase.FAILED, message = compiled.message)
                     }

@@ -112,7 +112,7 @@ internal class RunCoordinator(
                 currentCoroutineContext().ensureActive()
                 update(cardId, runId) { it.copy(run = it.run!!.copy(
                     phase = RunPhase.RUNNING,
-                    message = "正在读取模拟设备",
+                    message = "正在读取数据来源",
                 )) }
                 val result = engine.execute(card.rule) { progress ->
                     update(cardId, runId) { it.copy(run = it.run!!.copy(
@@ -128,7 +128,7 @@ internal class RunCoordinator(
                         is EngineResult.Success -> current.copy(
                             snapshot = result.snapshot,
                             run = run.copy(phase = RunPhase.SUCCEEDED,
-                                message = "核验通过 · 演示数据", endedAt = now()),
+                                message = "核验通过 · ${result.snapshot.sourceLabel}", endedAt = now()),
                         )
                         is EngineResult.NeedsUser -> current.copy(run = run.copy(
                             phase = RunPhase.NEEDS_USER, message = result.message, endedAt = now(),
