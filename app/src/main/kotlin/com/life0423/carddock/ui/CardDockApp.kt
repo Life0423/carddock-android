@@ -57,7 +57,7 @@ fun CardDockApp(state: PrototypeState, actions: PrototypeActions, openAccessibil
 
         Scaffold(
             containerColor = DockColors.Background,
-            topBar = { BrandHeader() },
+            topBar = { if (selectedTab != 0) BrandHeader() else Box(Modifier.statusBarsPadding()) },
             bottomBar = {
                 DockNavigation(selectedTab = selectedTab, onSelect = { selectedTab = it })
             },
@@ -68,8 +68,8 @@ fun CardDockApp(state: PrototypeState, actions: PrototypeActions, openAccessibil
                     CircularProgressIndicator(Modifier.align(Alignment.Center))
                 } else {
                     when (selectedTab) {
-                        0 -> SpaceScreen(state.cards, actions)
-                        1 -> TemplatesScreen(state.templates, actions.openCreator)
+                        0 -> SpaceScreen(state, actions)
+                        1 -> FilesScreen(state.cards)
                         else -> ProfileScreen(state.scenario, actions, openAccessibilitySettings)
                     }
                 }
@@ -110,9 +110,9 @@ private fun BrandHeader() {
 
 @Composable
 private fun DockNavigation(selectedTab: Int, onSelect: (Int) -> Unit) {
-    val labels = listOf("空间", "模板", "我的")
-    val tags = listOf("space", "templates", "profile")
-    val icons = listOf(DockIcons.Dashboard, DockIcons.GridView, DockIcons.PersonOutline)
+    val labels = listOf("空间", "文件", "我的")
+    val tags = listOf("space", "files", "profile")
+    val icons = listOf(DockIcons.Layers, DockIcons.Folder, DockIcons.PersonOutline)
     NavigationBar(containerColor = DockColors.Background, tonalElevation = 0.dp) {
         labels.forEachIndexed { index, label ->
             NavigationBarItem(
@@ -120,6 +120,10 @@ private fun DockNavigation(selectedTab: Int, onSelect: (Int) -> Unit) {
                 onClick = { onSelect(index) },
                 icon = { Icon(icons[index], contentDescription = null) },
                 label = { Text(label) },
+                colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
+                    selectedIconColor = DockColors.Mint, selectedTextColor = DockColors.Mint,
+                    indicatorColor = DockColors.Background,
+                ),
                 modifier = Modifier.testTag("tab_${tags[index]}"),
             )
         }

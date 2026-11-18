@@ -8,7 +8,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performScrollTo
 import com.life0423.carddock.CardDockApplication
 import com.life0423.carddock.MainActivity
 import com.life0423.carddock.core.model.RunPhase
@@ -42,8 +42,8 @@ class MainActivitySmokeTest {
         }
 
         val id = "starter-express-pickup"
-        compose.onNodeWithTag("space_list").performScrollToNode(hasTestTag("refresh_$id"))
-        compose.onNodeWithTag("refresh_$id").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("preview_$id").performClick()
+        compose.onNodeWithTag("refresh_$id").performScrollTo().assertIsDisplayed().performClick()
 
         try {
             compose.waitUntil(timeoutMillis = 10_000) {
@@ -59,8 +59,8 @@ class MainActivitySmokeTest {
         }
         val card = controller.state.value.cards.first { it.id == id }
         assertNotNull(card.snapshot)
-        compose.onNodeWithTag("space_list").performScrollToNode(hasText("A3-6281"))
+        compose.onNodeWithText("A3-6281").performScrollTo()
         compose.onNodeWithText("A3-6281").assertIsDisplayed()
-        compose.captureScreen("05-real-app-verified")
+        compose.captureScreen("05-native-demo-verified")
     }
 }

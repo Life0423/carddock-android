@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.Context
 import androidx.core.util.AtomicFile
 import com.life0423.carddock.core.model.CardRecord
+import com.life0423.carddock.core.model.CompareGroup
+import com.life0423.carddock.core.model.SpaceRecords
 import com.life0423.carddock.core.model.CardSnapshot
 import com.life0423.carddock.core.model.FieldValue
 import com.life0423.carddock.demo.TemplateCatalog
@@ -11,6 +13,7 @@ import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -67,7 +70,7 @@ class AtomicFileCardStoreTest {
         store.save(emptyList())
 
         assertEquals(emptyList<CardRecord>(), newStore().load())
-        assertEquals("1", json.parseToJsonElement(baseFile.readText()).jsonObject.getValue("version").jsonPrimitive.content)
+        assertEquals("2", json.parseToJsonElement(baseFile.readText()).jsonObject.getValue("version").jsonPrimitive.content)
     }
 
     @Test
@@ -123,6 +126,39 @@ class AtomicFileCardStoreTest {
 
         assertTrue(baseFile.isDirectory)
         assertEquals("keep", File(baseFile, "blocking-entry").readText())
+    }
+
+    @Test
+    fun versionOneMigratesWithoutChangingRulesOrSnapshots() = runBlocking {
+        val card = exampleCard()
+        baseFile.writeText("""{"version":1,"cards":${Json.encodeToString(listOf(card))}}""")
+        val loaded = newStore().loadSpace()!!
+        assertEquals(SpaceRecords(listOf(card)), loaded)
+        val second = card.copy(id = "second")
+        val space = SpaceRecords(listOf(card, second), listOf(CompareGroup("group", "对比", listOf(card.id, second.id))))
+        newStore().saveSpace(space)
+        File(baseFile.path + ".new").writeText("{ incomplete group replacement")
+        assertEquals(space, newStore().loadSpace())
+        assertEquals("2", json.parseToJsonElement(baseFile.readText()).jsonObject.getValue("version").jsonPrimitive.content)
+    }
+
+    @Test
+    fun invalidGroupReferencesDoNotOverwriteCardsOrRelations() = runBlocking {
+        val card = exampleCard()
+        val second = card.copy(id = "second")
+        val group = CompareGroup("group", "对比", listOf(card.id, second.id))
+        val space = SpaceRecords(listOf(card, second), listOf(group))
+        newStore().saveSpace(space)
+        val invalid = listOf(
+            listOf(group.copy(memberCardIds = listOf(card.id, "missing"))),
+            listOf(group.copy(memberCardIds = listOf(card.id, card.id))),
+            listOf(group, group.copy(id = "another")),
+            listOf(group.copy(name = " ")),
+        )
+        invalid.forEach { groups ->
+            assertThrows(IOException::class.java) { runBlocking { newStore().saveSpace(space.copy(groups = groups)) } }
+            assertEquals(space, newStore().loadSpace())
+        }
     }
 
     private fun newStore() = AtomicFileCardStore(context, json)

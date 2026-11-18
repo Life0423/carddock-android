@@ -38,14 +38,12 @@ class CardDockUiTest {
     val compose = createComposeRule()
 
     @Test
-    fun nativeTemplateAndPermissionEntryAreReachable() {
+    fun creationAndPermissionEntryAreReachable() {
         var settingsOpened = false
         val templates = TemplateCatalog.templates + com.life0423.carddock.cainiaoEmptyTemplate
         compose.setContent { CardDockApp(UiFixture.state(templates), UiFixture.actions(mutableListOf()), { settingsOpened = true }) }
-        compose.onNodeWithTag("tab_templates").performClick()
-        compose.onNodeWithTag("templates_list").performScrollToNode(hasTestTag("use_template_cainiao-empty"))
-        compose.onNodeWithText("真机只读模板").assertIsDisplayed()
-        compose.captureScreen("05-native-template")
+        compose.onNodeWithTag("open_creator").performClick()
+        compose.onNodeWithTag("create_card").performClick()
         compose.onNodeWithTag("tab_profile").performClick()
         compose.onNodeWithTag("profile_list").performScrollToNode(hasTestTag("accessibility_settings"))
         compose.captureScreen("06-native-settings")
@@ -54,7 +52,7 @@ class CardDockUiTest {
     }
 
     @Test
-    fun navigationTemplatesAndResetDispatchExplicitActions() {
+    fun navigationFilesAndResetDispatchExplicitActions() {
         val events = mutableListOf<String>()
         compose.setContent { CardDockApp(UiFixture.state(TemplateCatalog.templates), UiFixture.actions(events)) }
 
@@ -63,17 +61,10 @@ class CardDockUiTest {
         compose.captureScreen("01-space")
         compose.onNodeWithTag("open_creator").performClick()
 
-        compose.onNodeWithTag("tab_templates").performClick().assertIsSelected()
-        compose.onNodeWithText("待取快递").assertIsDisplayed()
-        compose.onNodeWithText("外卖进度").assertIsDisplayed()
-        compose.captureScreen("02-templates")
-        val brand = compose.onNodeWithText("卡坞").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        val heading = compose.onNodeWithText("从一个好用的模板开始").fetchSemanticsNode().boundsInRoot
-        assertTrue("Template content must stay below the persistent brand bar", heading.top >= brand.bottom)
-        compose.onNodeWithTag("templates_list").performScrollToNode(hasText("出行安排"))
-        compose.onNodeWithText("出行安排").assertIsDisplayed()
-        compose.onNodeWithTag("templates_list").performScrollToNode(hasTestTag("use_template_express-pickup"))
-        compose.onNodeWithTag("use_template_express-pickup").performClick()
+        compose.onNodeWithTag("create_card").performClick()
+        compose.onNodeWithTag("tab_files").performClick().assertIsSelected()
+        compose.onNodeWithText("规则文件").assertIsDisplayed()
+        compose.captureScreen("02-files")
 
         compose.onNodeWithTag("tab_profile").performClick().assertIsSelected()
         compose.captureScreen("04-profile")
@@ -84,7 +75,7 @@ class CardDockUiTest {
         compose.onNodeWithTag("reset_demo").performClick()
         compose.onNodeWithTag("confirm_reset").assertIsDisplayed().performClick()
 
-        assertEquals(listOf("open:blank", "open:express-pickup", "scenario:READ_FAILURE", "reset"), events)
+        assertEquals(listOf("open:blank", "scenario:READ_FAILURE", "reset"), events)
     }
 
     @Test
@@ -132,7 +123,7 @@ class CardDockUiTest {
         val state = mutableStateOf(UiFixture.state(TemplateCatalog.templates).copy(cards = listOf(UiFixture.card)))
         compose.setContent { CardDockApp(state.value, UiFixture.actions(events)) }
 
-        compose.onNodeWithTag("space_list").performScrollToNode(hasTestTag("refresh_express-card"))
+        compose.onNodeWithTag("preview_express-card").performClick()
         compose.onNodeWithTag("refresh_express-card").performClick()
 
         compose.runOnIdle {
@@ -140,7 +131,7 @@ class CardDockUiTest {
                 cards = listOf(UiFixture.card.copy(run = RunInfo("run", RunPhase.RUNNING))),
             )
         }
-        compose.onNodeWithTag("space_list").performScrollToNode(hasTestTag("cancel_express-card"))
+        compose.onNodeWithTag("cancel_express-card").performScrollTo()
         compose.onNodeWithTag("cancel_express-card").performClick()
 
         compose.runOnIdle {
@@ -148,9 +139,9 @@ class CardDockUiTest {
                 cards = listOf(UiFixture.card.copy(run = RunInfo("run", RunPhase.NEEDS_USER))),
             )
         }
-        compose.onNodeWithTag("space_list").performScrollToNode(hasTestTag("resume_express-card"))
+        compose.onNodeWithTag("resume_express-card").performScrollTo()
         compose.onNodeWithTag("resume_express-card").performClick()
-        compose.onNodeWithTag("space_list").performScrollToNode(hasTestTag("menu_express-card"))
+        compose.onNodeWithTag("menu_express-card").performScrollTo()
         compose.onNodeWithTag("menu_express-card").performClick()
         compose.onNodeWithTag("remove_express-card").performClick()
         compose.onNodeWithTag("confirm_remove_express-card").assertIsDisplayed().performClick()

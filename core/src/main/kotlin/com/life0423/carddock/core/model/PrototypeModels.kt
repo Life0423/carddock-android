@@ -70,6 +70,7 @@ data class CardRecord(
     val rule: RuleSpec,
     val snapshot: CardSnapshot? = null,
     val run: RunInfo? = null,
+    val originalPrompt: String = "",
 )
 
 /** 一条可试运行的演示模板。examplePrompt 只负责预填，编译器仍按用户最终输入分流，不按模板 id。 */

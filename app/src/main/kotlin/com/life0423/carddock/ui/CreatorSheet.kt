@@ -75,7 +75,7 @@ internal fun CreatorSheet(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Text(
-                    "描述想放进空间的功能，试运行并核验结果后再保存。选择下方模板开始。",
+                    "Mock 编译：目前支持演示取件、配送进度、出行，以及菜鸟空状态核验。选餐推荐尚未接入。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = DockColors.Muted,
                 )
@@ -149,6 +149,9 @@ internal fun CreatorSheet(
                         modifier = Modifier.testTag("creator_message"),
                     )
                 }
+                draft.template?.let { template ->
+                    Text("规则 v${template.rule.schemaVersion} · ${template.rule.sourceId}\n${template.description}", style = MaterialTheme.typography.bodySmall, color = DockColors.Muted)
+                }
                 draft.preview?.let { preview ->
                     Surface(color = DockColors.Background, shape = RoundedCornerShape(20.dp)) {
                         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -157,6 +160,7 @@ internal fun CreatorSheet(
                                 Text("卡片预览", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                             }
                             SnapshotFields(preview.fields)
+                            Text("采集于 ${formatTimestamp(preview.fetchedAt)}", style = MaterialTheme.typography.labelSmall)
                             Text(preview.sourceLabel, color = DockColors.Muted, style = MaterialTheme.typography.labelSmall)
                         }
                     }

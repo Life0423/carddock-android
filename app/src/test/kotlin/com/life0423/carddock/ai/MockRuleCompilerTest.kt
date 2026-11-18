@@ -32,7 +32,7 @@ class MockRuleCompilerTest {
 
     @Test
     fun ambiguousUnknownAndWriteRequestsAreExplicitlyUnsupported() = runBlocking {
-        val requests = listOf(" ", "做一张卡片", "查看天气", "同时查看快递和外卖", "帮我支付外卖订单", "修改火车票", "show my training plan")
+        val requests = listOf(" ", "做一张卡片", "查看天气", "同时查看快递和外卖", "帮我支付外卖订单", "修改火车票", "show my training plan", "外卖预算25元以内少辣", "美团午餐推荐", "查看美团配送", "帮我找便宜外卖", "挑一家外卖")
 
         for (request in requests) {
             val result = compiler.compile(request)

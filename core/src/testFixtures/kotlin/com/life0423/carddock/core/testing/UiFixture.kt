@@ -75,6 +75,10 @@ object UiFixture {
         changeScenario = { events += "scenario:${it.name}" },
         resetDemo = { events += "reset" },
         dismissNotice = { events += "notice" },
+        createGroup = { name, ids -> events += "group:create:$name:${ids.joinToString()}" },
+        renameGroup = { id, name -> events += "group:rename:$id:$name" },
+        removeGroupMember = { id, cardId -> events += "group:remove:$id:$cardId" },
+        dissolveGroup = { events += "group:dissolve:$it" },
     )
 
     private fun displayRule(id: String) = RuleSpec(

@@ -3,6 +3,8 @@ package com.life0423.carddock.data
 import android.content.Context
 import androidx.core.util.AtomicFile
 import com.life0423.carddock.core.model.CardRecord
+import com.life0423.carddock.core.model.CompareGroup
+import com.life0423.carddock.core.model.SpaceRecords
 import com.life0423.carddock.core.port.CardStore
 import com.life0423.carddock.core.rule.RuleValidator
 import java.io.File
@@ -35,7 +37,10 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
      * 没有正式文件也没有 .bak 时返回 null，表示第一次启动。
      * 其它读失败或版本不对直接抛出，调用方不得当成空集合。
      */
-    override suspend fun load(): List<CardRecord>? = withContext(Dispatchers.IO) {
+    override suspend fun load(): List<CardRecord>? = loadSpace()?.cards
+
+    /** v1 没有组；读取时补空关系，下一次提交在同一文件中写入 v2。 */
+    override suspend fun loadSpace(): SpaceRecords? = withContext(Dispatchers.IO) {
         lock.withLock {
             currentCoroutineContext().ensureActive()
             val text = try {
@@ -47,9 +52,10 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
             }
             currentCoroutineContext().ensureActive()
             val stored = json.decodeFromString<StoredCards>(text)
-            if (stored.version != STORAGE_VERSION) throw IOException("Unsupported card storage version: ${stored.version}")
-            validate(stored.cards)
-            stored.cards
+            if (stored.version !in 1..STORAGE_VERSION) throw IOException("Unsupported card storage version: ${stored.version}")
+            val space = SpaceRecords(stored.cards, stored.groups)
+            validate(space)
+            space
         }
     }
 
@@ -57,11 +63,14 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
      * 校验通过后才写。取消或写失败走 failWrite，只丢掉未完成的 .new。
      * finishWrite 之后只确认字节，失败只抛异常，不回滚已经换上的正式文件。
      */
-    override suspend fun save(cards: List<CardRecord>) = withContext(Dispatchers.IO) {
+    override suspend fun save(cards: List<CardRecord>) = saveSpace(SpaceRecords(cards))
+
+    /** 卡片和组放在同一次 AtomicFile 提交内，不存在只写完半个组的状态。 */
+    override suspend fun saveSpace(space: SpaceRecords) = withContext(Dispatchers.IO) {
         lock.withLock {
             currentCoroutineContext().ensureActive()
-            validate(cards)
-            val bytes = json.encodeToString(StoredCards(STORAGE_VERSION, cards)).toByteArray(Charsets.UTF_8)
+            validate(space)
+            val bytes = json.encodeToString(StoredCards(STORAGE_VERSION, space.cards, space.groups)).toByteArray(Charsets.UTF_8)
             currentCoroutineContext().ensureActive()
             val output = file.startWrite()
             try {
@@ -96,22 +105,34 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
     }
 
     /** 空白 id、空标题、重复 id 或规则不合法都拒绝整份集合，避免坏数据进内存后再被写回去。 */
-    private fun validate(cards: List<CardRecord>) {
+    private fun validate(space: SpaceRecords) {
         val ids = mutableSetOf<String>()
-        for (card in cards) {
+        for (card in space.cards) {
             if (card.id.isBlank() || card.title.isBlank() || !ids.add(card.id)) {
                 throw IOException("Invalid or duplicate card identity")
             }
             RuleValidator.validate(card.rule)?.let { throw IOException("Invalid stored rule: ${it.code}") }
         }
+        val groupIds = mutableSetOf<String>()
+        val assigned = mutableSetOf<String>()
+        for (group in space.groups) {
+            if (group.id.isBlank() || !groupIds.add(group.id) || group.name.isBlank() || group.name.length > 30 ||
+                group.memberCardIds.size < 2 || group.memberCardIds.any { it !in ids || !assigned.add(it) }) {
+                throw IOException("Invalid comparison group or member reference")
+            }
+        }
     }
 
     @Serializable
-    private data class StoredCards(val version: Int, val cards: List<CardRecord>)
+    private data class StoredCards(
+        val version: Int,
+        val cards: List<CardRecord>,
+        val groups: List<CompareGroup> = emptyList(),
+    )
 
     private companion object {
         const val FILE_NAME = "cards-v1.json"
-        const val STORAGE_VERSION = 1
+        const val STORAGE_VERSION = 2
         private val locks = ConcurrentHashMap<String, Mutex>()
 
         /**

@@ -1,6 +1,8 @@
 package com.life0423.carddock.core.testing
 
 import com.life0423.carddock.core.model.CardRecord
+import com.life0423.carddock.core.model.CompareGroup
+import com.life0423.carddock.core.model.SpaceRecords
 import com.life0423.carddock.core.model.TemplateDefinition
 import com.life0423.carddock.core.port.CardStore
 import com.life0423.carddock.core.port.CompileResult
@@ -22,6 +24,7 @@ import kotlinx.coroutines.delay
  */
 class MemoryCardStore(initial: List<CardRecord>?) : CardStore {
     var disk: List<CardRecord>? = initial
+    var groups: List<CompareGroup> = emptyList()
     var failRead = false
     var failWrite = false
     var failAfterCommit = false
@@ -35,11 +38,17 @@ class MemoryCardStore(initial: List<CardRecord>?) : CardStore {
         return disk
     }
 
-    override suspend fun save(cards: List<CardRecord>) {
+    override suspend fun loadSpace(): SpaceRecords? = load()?.let { SpaceRecords(it, groups) }
+
+    override suspend fun save(cards: List<CardRecord>) = saveSpace(SpaceRecords(cards))
+
+    override suspend fun saveSpace(space: SpaceRecords) {
+        val cards = space.cards
         writes += 1
         beforeSave?.invoke(cards)
         if (failWrite) throw IOException("injected precommit write failure")
         disk = cards.toList()
+        groups = space.groups.toList()
         if (failAfterCommit) throw IOException("injected postcommit readback failure")
     }
 }

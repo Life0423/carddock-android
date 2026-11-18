@@ -23,6 +23,11 @@ class MockRuleCompiler(templates: List<TemplateDefinition>) : RuleCompiler {
             return CompileResult.Unsupported("当前原型只演示信息读取，暂不支持下单、支付或修改数据。")
         }
 
+        // 选餐与配送是不同能力，不能把预算、口味需求静默落到配送演示。
+        if (listOf("午餐", "选餐", "推荐", "预算", "口味", "少辣", "评价", "美团", "元以内").any(request::contains)) {
+            return CompileResult.Unsupported("选餐推荐与美团真实读取尚未接入；当前外卖模板仅演示配送进度，不会执行预算或口味筛选。")
+        }
+
         // 真机请求只匹配已经核验的固定模板，不回退到模拟取件码。
         if ("菜鸟" in request) {
             val template = availableTemplates.singleOrNull { it.id == "cainiao-empty" }
@@ -37,6 +42,10 @@ class MockRuleCompiler(templates: List<TemplateDefinition>) : RuleCompiler {
         }
         if (matchingKinds.isEmpty()) {
             return CompileResult.Unsupported("暂未匹配到模板。当前支持快递取件、外卖进度和出行安排。")
+        }
+        if (matchingKinds.single() == TemplateKind.DELIVERY &&
+            !listOf("进度", "状态", "送达", "到哪", "什么时候到", "status", "arrival", "tracking").any(request::contains)) {
+            return CompileResult.Unsupported("外卖演示仅支持查询配送状态或送达时间；选餐与商家推荐尚未接入。")
         }
         val template = availableTemplates.singleOrNull { it.kind == matchingKinds.single() && it.rule.sourceId.startsWith("demo.") }
             ?: return CompileResult.Unsupported("这个演示模板暂不可用，请选择其他模板。")

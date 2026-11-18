@@ -1,6 +1,8 @@
 package com.life0423.carddock.core.session
 
 import com.life0423.carddock.core.model.CardRecord
+import com.life0423.carddock.core.model.CompareGroup
+import com.life0423.carddock.core.model.SpaceRecords
 import com.life0423.carddock.core.model.RunPhase
 import com.life0423.carddock.core.port.CardStore
 import kotlinx.coroutines.CancellationException
@@ -16,6 +18,7 @@ import kotlinx.coroutines.withContext
 internal data class CardCollectionState(
     val loading: Boolean = true,
     val cards: List<CardRecord> = emptyList(),
+    val groups: List<CompareGroup> = emptyList(),
 )
 
 /**
@@ -40,7 +43,7 @@ internal class CardCollection(
      */
     suspend fun initialize(initialCards: List<CardRecord>) = lock.withLock {
         val stored = try {
-            store.load()
+            store.loadSpace()
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -49,18 +52,18 @@ internal class CardCollection(
             notify("本地演示数据无法读取，原文件未覆盖。可在“我的”中重置演示。")
             return@withLock
         }
-        val restored = settleBusyLoadedFromDisk(stored ?: initialCards)
+        val restored = settleBusyLoadedFromDisk(stored ?: SpaceRecords(initialCards))
         currentCoroutineContext().ensureActive()
         try {
             withContext(NonCancellable) {
-                if (stored == null || restored != stored) store.save(restored)
-                mutableState.value = CardCollectionState(loading = false, cards = restored)
+                if (stored == null || restored != stored) store.saveSpace(restored)
+                mutableState.value = CardCollectionState(loading = false, cards = restored.cards, groups = restored.groups)
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             // 读已经成功。写回中断态失败不能当成文件损坏，否则界面会空掉并引导用户用种子卡重置。
-            mutableState.value = CardCollectionState(loading = false, cards = restored)
+            mutableState.value = CardCollectionState(loading = false, cards = restored.cards, groups = restored.groups)
             notify("恢复状态未能写回，原内容仍在。可以稍后重试。")
         }
     }
@@ -73,12 +76,24 @@ internal class CardCollection(
      * 读回抛错只表示无法确认，磁盘可能已经是新内容。读回得到 null 或另一份内容，则是确认没提交。
      * 读回内容与本次要写的列表相同则返回 true。取消会抛出，不是 false。
      */
-    suspend fun update(transform: (List<CardRecord>) -> List<CardRecord>): Boolean = lock.withLock {
+    suspend fun update(transform: (List<CardRecord>) -> List<CardRecord>): Boolean = updateSpace { current ->
+        val cards = transform(current.cards)
+        val ids = cards.map { it.id }.toSet()
+        // 真正删除卡片时一起清理引用；刷新和新增不改变组关系。
+        val groups = current.groups.mapNotNull { group ->
+            val members = group.memberCardIds.filter { it in ids }
+            if (members.size < 2) null else group.copy(memberCardIds = members)
+        }
+        current.copy(cards = cards, groups = groups)
+    }
+
+    /** 卡片顺序和组关系共享既有提交锁，失败对齐也读取整个空间。 */
+    suspend fun updateSpace(transform: (SpaceRecords) -> SpaceRecords): Boolean = lock.withLock {
         if (!readable || state.value.loading) {
             notify("本地数据尚不可写，请先完成加载或重置演示。")
             return@withLock false
         }
-        val current = state.value.cards
+        val current = SpaceRecords(state.value.cards, state.value.groups)
         val next = transform(current)
         if (next == current) return@withLock false
         persist(next)
@@ -86,34 +101,34 @@ internal class CardCollection(
 
     /** 整表替换。成功时恢复为可写；读失败后只有这条路径能重新允许 update。 */
     suspend fun replace(cards: List<CardRecord>): Boolean = lock.withLock {
-        val saved = persist(cards)
+        val saved = persist(SpaceRecords(cards))
         if (saved) readable = true
         saved
     }
 
-    private suspend fun persist(cards: List<CardRecord>): Boolean {
+    private suspend fun persist(space: SpaceRecords): Boolean {
         return try {
             currentCoroutineContext().ensureActive()
             // 成功路径里，取消不能把磁盘提交和内存发布拆开。失败后的对齐在下面，并且不能被取消跳过。
             withContext(NonCancellable) {
-                store.save(cards)
-                mutableState.value = CardCollectionState(loading = false, cards = cards)
+                store.saveSpace(space)
+                mutableState.value = CardCollectionState(loading = false, cards = space.cards, groups = space.groups)
             }
             true
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             // 调用方可能已经取消。先对齐磁盘再把取消传出去；协调被跳过时，旧内存仍可写，会盖掉已提交的新卡。
-            val reconciled = withContext(NonCancellable) { reconcileAfterFailedSave(cards) }
+            val reconciled = withContext(NonCancellable) { reconcileAfterFailedSave(space) }
             currentCoroutineContext().ensureActive()
             reconciled
         }
     }
 
     /** 返回 true 表示磁盘上已经是本次要保存的集合。读失败只说明无法确认，不等于没有提交；那时暂停后续写入。 */
-    private suspend fun reconcileAfterFailedSave(attempted: List<CardRecord>): Boolean {
+    private suspend fun reconcileAfterFailedSave(attempted: SpaceRecords): Boolean {
         val onDisk = try {
-            store.load()
+            store.loadSpace()
         } catch (cancelled: CancellationException) {
             // 取消不是读失败，不能在这里当成未提交。外层会在不可取消的协调之后再传播取消。
             throw cancelled
@@ -129,7 +144,7 @@ internal class CardCollection(
         // 磁盘就是这次提交时，进行中的阶段原样留下。没写上时收掉没有活协程的忙碌卡；没有活协程不表示这是崩溃残留。
         val committed = onDisk == attempted
         val published = if (committed) onDisk else settleBusyLoadedFromDisk(onDisk)
-        mutableState.value = CardCollectionState(loading = false, cards = published)
+        mutableState.value = CardCollectionState(loading = false, cards = published.cards, groups = published.groups)
         if (committed) return true
         notify("保存失败，本次更改未提交。请检查设备空间后重试。")
         return false
@@ -141,11 +156,11 @@ internal class CardCollection(
      * 无活协程不等于崩溃残留：本进程里正常结束设备协程的 NEEDS_USER 也会被收掉，这是当前策略。
      * 协程还在的任务留在内存里的阶段。
      */
-    private fun settleBusyLoadedFromDisk(cards: List<CardRecord>): List<CardRecord> {
+    private fun settleBusyLoadedFromDisk(space: SpaceRecords): SpaceRecords {
         val current = state.value.cards.associateBy { it.id }
-        return cards.map { card ->
+        return space.copy(cards = space.cards.map { card ->
             if (hasLiveJob(card.id)) current[card.id] ?: card else interruptStaleBusy(card)
-        }
+        })
     }
 
     private fun interruptStaleBusy(card: CardRecord): CardRecord {

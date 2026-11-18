@@ -1,6 +1,7 @@
 package com.life0423.carddock.core.session
 
 import com.life0423.carddock.core.model.CardRecord
+import com.life0423.carddock.core.model.CompareGroup
 import com.life0423.carddock.core.model.CardSnapshot
 import com.life0423.carddock.core.model.RunPhase
 import com.life0423.carddock.core.model.TemplateDefinition
@@ -29,6 +30,7 @@ data class CreationDraft(
 data class PrototypeState(
     val loading: Boolean = true,
     val cards: List<CardRecord> = emptyList(),
+    val groups: List<CompareGroup> = emptyList(),
     val templates: List<TemplateDefinition> = emptyList(),
     val draft: CreationDraft? = null,
     val scenario: DemoScenario = DemoScenario.NORMAL,
@@ -54,4 +56,8 @@ data class PrototypeActions(
     val changeScenario: (DemoScenario) -> Unit,
     val resetDemo: () -> Unit,
     val dismissNotice: () -> Unit,
+    val createGroup: (String, List<String>) -> Unit = { _, _ -> },
+    val renameGroup: (String, String) -> Unit = { _, _ -> },
+    val removeGroupMember: (String, String) -> Unit = { _, _ -> },
+    val dissolveGroup: (String) -> Unit = {},
 )

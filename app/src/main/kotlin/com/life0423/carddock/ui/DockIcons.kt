@@ -33,6 +33,25 @@ import androidx.compose.ui.unit.dp
  */
 internal object DockIcons {
 
+    /** 空间与文件导航采用同一套 24dp 线性轮廓，保持选中稿的轻量视觉。 */
+    val Layers: ImageVector by lazy {
+        ImageVector.Builder("SpaceLayers", 24.dp, 24.dp, 24f, 24f).apply {
+            path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.8f) {
+                moveTo(3f, 7f); lineTo(12f, 2.5f); lineTo(21f, 7f); lineTo(12f, 11.5f); close()
+                moveTo(3f, 12f); lineTo(12f, 16.5f); lineTo(21f, 12f)
+                moveTo(3f, 17f); lineTo(12f, 21.5f); lineTo(21f, 17f)
+            }
+        }.build()
+    }
+    val Folder: ImageVector by lazy {
+        ImageVector.Builder("FilesFolder", 24.dp, 24.dp, 24f, 24f).apply {
+            path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.8f) {
+                moveTo(3f, 5f); lineTo(9f, 5f); lineTo(11f, 8f); lineTo(21f, 8f)
+                lineTo(21f, 20f); lineTo(3f, 20f); close()
+            }
+        }.build()
+    }
+
     val Dashboard: ImageVector by lazy {
         ImageVector.Builder(
             name = "Rounded.Dashboard",

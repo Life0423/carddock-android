@@ -2,6 +2,7 @@ package com.life0423.carddock.core.session
 
 import com.life0423.carddock.core.engine.RuleEngine
 import com.life0423.carddock.core.model.CardRecord
+import com.life0423.carddock.core.model.CompareGroup
 import com.life0423.carddock.core.model.RunPhase
 import com.life0423.carddock.core.model.TemplateDefinition
 import com.life0423.carddock.core.port.CardStore
@@ -32,7 +33,7 @@ class PrototypeController(
     private val scope: CoroutineScope,
     private val setDeviceScenario: (DemoScenario) -> Unit = {},
     now: () -> Long = System::currentTimeMillis,
-    newId: () -> String = { UUID.randomUUID().toString() },
+    private val newId: () -> String = { UUID.randomUUID().toString() },
 ) {
     private val notice = MutableStateFlow<String?>(null)
     private val scenario = MutableStateFlow(DemoScenario.NORMAL)
@@ -56,7 +57,7 @@ class PrototypeController(
     val state: StateFlow<PrototypeState> = combine(cards.state, creator.draft, scenario, notice) {
             collection, draft, selectedScenario, message ->
         PrototypeState(
-            loading = collection.loading, cards = collection.cards, templates = templates,
+            loading = collection.loading, cards = collection.cards, groups = collection.groups, templates = templates,
             draft = draft, scenario = selectedScenario, notice = message,
         )
     }.stateIn(scope, SharingStarted.Eagerly, PrototypeState(templates = templates))
@@ -89,7 +90,79 @@ class PrototypeController(
         changeScenario = ::changeScenario,
         resetDemo = ::reset,
         dismissNotice = { notice.value = null },
+        createGroup = ::createGroup,
+        renameGroup = ::renameGroup,
+        removeGroupMember = ::removeGroupMember,
+        dissolveGroup = ::dissolveGroup,
     )
+
+    /** 建组只收纳独立卡片，在最早被选卡位置插入有序成员，未选卡相对顺序不变。 */
+    private fun createGroup(name: String, memberIds: List<String>) {
+        if (resetting) return
+        scope.launch {
+            cards.updateSpace { current ->
+                val title = name.trim()
+                val selected = memberIds.toSet()
+                val available = current.cards.map { it.id }.toSet() - current.groups.flatMap { it.memberCardIds }.toSet()
+                if (title.isEmpty() || title.length > 30) {
+                    notify("对比组名称需为 1～30 个字符")
+                    return@updateSpace current
+                }
+                if (selected.size < 2 || selected.size != memberIds.size || !available.containsAll(selected)) {
+                    notify("请选择至少 2 张不同的独立卡片")
+                    return@updateSpace current
+                }
+                val byId = current.cards.associateBy { it.id }
+                val first = current.cards.indexOfFirst { it.id in selected }
+                val ordered = current.cards.take(first) + memberIds.map { byId.getValue(it) } +
+                    current.cards.drop(first).filterNot { it.id in selected }
+                current.copy(cards = ordered, groups = current.groups + CompareGroup(newId(), title, memberIds.toList()))
+            }
+        }
+    }
+
+    /** 重命名不触碰成员身份、规则、快照或位置。 */
+    private fun renameGroup(groupId: String, name: String) {
+        if (resetting) return
+        scope.launch {
+            val title = name.trim()
+            if (title.isEmpty() || title.length > 30) {
+                notify("对比组名称需为 1～30 个字符")
+                return@launch
+            }
+            cards.updateSpace { current ->
+                current.copy(groups = current.groups.map { if (it.id == groupId) it.copy(name = title) else it })
+            }
+        }
+    }
+
+    /** 移出者紧随原组；不足两名时解散关系，保留全部卡片。 */
+    private fun removeGroupMember(groupId: String, cardId: String) {
+        if (resetting) return
+        scope.launch {
+            cards.updateSpace { current ->
+                val group = current.groups.find { it.id == groupId } ?: return@updateSpace current
+                if (cardId !in group.memberCardIds) return@updateSpace current
+                val remaining = group.memberCardIds.filterNot { it == cardId }
+                val members = group.memberCardIds.toSet()
+                val first = current.cards.indexOfFirst { it.id in members }
+                val byId = current.cards.associateBy { it.id }
+                val ordered = current.cards.take(first) + (remaining + cardId).map { byId.getValue(it) } +
+                    current.cards.drop(first).filterNot { it.id in members }
+                current.copy(cards = ordered, groups = current.groups.mapNotNull {
+                    if (it.id != groupId) it else if (remaining.size < 2) null else it.copy(memberCardIds = remaining)
+                })
+            }
+        }
+    }
+
+    /** 解散只删除关系；成员已按显示顺序保存在 cards 中，无需复制或删除 Skill。 */
+    private fun dissolveGroup(groupId: String) {
+        if (resetting) return
+        scope.launch {
+            cards.updateSpace { current -> current.copy(groups = current.groups.filterNot { it.id == groupId }) }
+        }
+    }
 
     /** 只执行一次。重复调用直接返回，避免再次用磁盘或种子盖掉已经在跑的内存状态。 */
     suspend fun initialize() {

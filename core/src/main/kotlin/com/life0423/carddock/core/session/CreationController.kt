@@ -149,10 +149,10 @@ internal class CreationController(
         work = scope.launch {
             val card = CardRecord(
                 id = newId(), title = current.title.trim(), kind = template.kind,
-                rule = template.rule, snapshot = preview,
+                rule = template.rule, snapshot = preview, originalPrompt = current.prompt,
                 run = RunInfo(
                     id = newId(), phase = RunPhase.SUCCEEDED,
-                    message = "试运行已核验 · 演示数据",
+                    message = "试运行已核验 · ${preview.sourceLabel}",
                     currentStep = template.rule.steps.size, totalSteps = template.rule.steps.size,
                     startedAt = preview.fetchedAt, endedAt = now(),
                 ),

@@ -2,7 +2,7 @@ package com.life0423.carddock.ui.theme
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
-import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
@@ -11,25 +11,25 @@ import androidx.compose.ui.graphics.Color
  * 业务层不要直接写色值。界面只引用这里的命名颜色。
  */
 object DockColors {
-    val Background = Color(0xFF08131F)
-    val Surface = Color(0xFF122333)
-    val Raised = Color(0xFF1B3042)
-    val Outline = Color(0xFF2C4354)
-    val Mint = Color(0xFF8BE5CF)
-    val Amber = Color(0xFFFFCD85)
-    val Blue = Color(0xFF9FC8FF)
-    val Text = Color(0xFFF0F7FA)
-    val Muted = Color(0xFFA1B4C3)
-    val Error = Color(0xFFFFB4AD)
+    val Background = Color(0xFFFFFFFF)
+    val Surface = Color(0xFFF5F5F8)
+    val Raised = Color(0xFFF0EFFF)
+    val Outline = Color(0xFFE8E9EE)
+    val Mint = Color(0xFF5754D6)
+    val Amber = Color(0xFF8A5B16)
+    val Blue = Color(0xFF5754D6)
+    val Text = Color(0xFF202124)
+    val Muted = Color(0xFF737780)
+    val Error = Color(0xFFB3333F)
 }
 
-private val CardDockColorScheme = darkColorScheme(
+private val CardDockColorScheme = lightColorScheme(
     primary = DockColors.Mint,
-    onPrimary = Color(0xFF073A30),
-    primaryContainer = Color(0xFF214C43),
-    onPrimaryContainer = Color(0xFFC7F8EA),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFF0EFFF),
+    onPrimaryContainer = Color(0xFF343185),
     secondary = DockColors.Blue,
-    onSecondary = Color(0xFF15354F),
+    onSecondary = Color(0xFFFFFFFF),
     secondaryContainer = DockColors.Raised,
     onSecondaryContainer = DockColors.Text,
     tertiary = DockColors.Amber,
@@ -44,7 +44,7 @@ private val CardDockColorScheme = darkColorScheme(
 )
 
 /**
- * A deliberate dark prototype theme; no device-dependent dynamic colors.
+ * 已选浅色主题；保留固定品牌色，不跟随壁纸动态取色。
  * 不跟系统动态取色，演示配色不会被壁纸色替换。
  */
 @Composable
