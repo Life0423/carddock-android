@@ -86,3 +86,10 @@ private fun nativeRule(id: String, source: String, target: String, vararg fields
             add(RuleStep.RequireField(key))
         }
     })
+
+
+/** 个人模板经独立重跑核验，来源与结构锚点随模板及卡片保存。 */
+internal fun reminderTemplate(source: String, demand: String, route: com.life0423.carddock.core.rule.ReminderRoute) =
+    TemplateDefinition(id = "personal-reminder", title = "今日可见提醒", kind = TemplateKind.REMINDER,
+        description = "查看今日列表中可核验的下一次通知", examplePrompt = demand,
+        rule = nativeRule("reminder-route-v1", source, "visible-reminder", "名称" to "名称", "通知时间" to "通知时间").copy(reminderRoute = route))

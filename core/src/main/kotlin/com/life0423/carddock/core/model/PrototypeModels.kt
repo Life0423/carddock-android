@@ -5,7 +5,7 @@ import kotlinx.serialization.Serializable
 
 /** 三种内置演示。编译器按这个分流，不是用户可扩展的分类。 */
 @Serializable
-enum class TemplateKind { EXPRESS, DELIVERY, TRAVEL, SHOPPING }
+enum class TemplateKind { EXPRESS, DELIVERY, TRAVEL, SHOPPING, REMINDER }
 
 /** 规则读出的一项。key 是 outputKey，label 给界面。引擎写入时会去掉 value 的首尾空白。 */
 @Serializable

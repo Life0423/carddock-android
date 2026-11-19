@@ -1,5 +1,7 @@
 package com.life0423.carddock.platform.mika
 
+import com.life0423.carddock.core.rule.ReminderRoute
+import com.life0423.carddock.platform.UpcomingReminder
 import android.content.Context
 import android.graphics.PixelFormat
 import android.media.ImageReader
@@ -47,10 +49,26 @@ internal class MikaBackgroundQuery(private val context: Context, private val foc
     ) { reader, id, connected, frame ->
         LatestTakeout(connected,
             observe = { reader.clearCache(); reader.observeDetail(MEITUAN_PACKAGE, id, geometry = true) },
-            tap = { node -> connected() && reader.tapOrder(id, node) },
+            tap = { node -> connected() && reader.tapReadTarget(id, MEITUAN_PACKAGE, node) },
             selection = { node -> frame.selection(node) },
             expand = { reader.clickBackgroundLabel(id, MEITUAN_PACKAGE, "配送骑手/支付方式等") },
         ).inspect()
+    }
+
+    /** 本机兼容性试查。仅观察本次授权的应用，并由系统管理后台屏生命周期。 */
+    @android.annotation.SuppressLint("NewApi")
+    suspend fun reminderTrial(target: String, route: ReminderRoute? = null,
+        learn: ((List<String>) -> List<Int>)? = null, learned: (ReminderRoute) -> Unit = {}): DeviceResponse {
+        val agenda = UpcomingReminder(target, route, learn, learned)
+        do {
+            val result = query("提醒来源", { shell, surface, w, h, dpi -> shell.openLauncher(surface, w, h, dpi, target) }) {
+                reader, id, connected, _ ->
+                agenda.readOne(connected,
+                    observe = { reader.clearCache(); reader.observeDetail(target, id, geometry = true) },
+                    tap = { connected() && reader.tapReadTarget(id, target, it) })
+            }
+            if (result !is DeviceResponse.Ready || !agenda.hasMore) return result
+        } while (true)
     }
 
     suspend fun meituan(oid: String): DeviceResponse = query(

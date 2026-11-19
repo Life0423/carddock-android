@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.ShoppingCart
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -40,6 +41,7 @@ internal fun TemplateKind.icon(): ImageVector = when (this) {
     TemplateKind.EXPRESS -> DockIcons.Inventory2
     TemplateKind.DELIVERY -> DockIcons.LocalShipping
     TemplateKind.TRAVEL -> DockIcons.Train
+    TemplateKind.REMINDER -> Icons.Rounded.Notifications
     TemplateKind.SHOPPING -> Icons.Rounded.ShoppingCart
 }
 
@@ -47,6 +49,7 @@ internal fun TemplateKind.accent(): Color = when (this) {
     TemplateKind.EXPRESS -> DockColors.Amber
     TemplateKind.DELIVERY -> DockColors.Mint
     TemplateKind.TRAVEL -> DockColors.Blue
+    TemplateKind.REMINDER -> DockColors.Mint
     TemplateKind.SHOPPING -> DockColors.Mint
 }
 

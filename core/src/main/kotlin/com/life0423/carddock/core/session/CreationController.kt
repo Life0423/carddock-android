@@ -15,6 +15,7 @@ import com.life0423.carddock.core.port.RuleCompiler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import com.life0423.carddock.core.port.DiscoveryResult
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,6 +40,7 @@ internal class CreationController(
     private val newId: () -> String,
     private val notify: (String) -> Unit,
     private val library: TemplateLibrary,
+    private val discover: (suspend (String) -> DiscoveryResult?)?,
 ) {
     private val mutableDraft = MutableStateFlow<CreationDraft?>(null)
     val draft = mutableDraft.asStateFlow()
@@ -182,12 +184,24 @@ internal class CreationController(
         work = scope.launch {
             try {
                 // 编译放在通道锁外，匹配模板时不堵住正在刷新的卡片。
-                val compiled = when {
+                var observed: Map<String, String>? = null
+                var compiled = when {
                     generate -> modelCompiler?.compile(current.prompt)
                         ?: CompileResult.Unsupported("请先在“我的”配置模型。")
                     current.template != null -> CompileResult.Success(current.template)
                     current.personalTemplateId != null -> personalCompiler.compile(current.prompt.trim())
                     else -> compiler.compile(current.prompt.trim())
+                }
+                if (prepare && compiled is CompileResult.Unsupported && discover != null) {
+                    edit(token) { it.copy(phase = RunPhase.RUNNING, message = "正在后台试查需求…") }
+                    when (val found = lane.withLock { discover.invoke(current.prompt.trim()) }) {
+                        is DiscoveryResult.Found -> {
+                            observed = found.candidate.observed
+                            compiled = CompileResult.Success(found.candidate.template)
+                        }
+                        is DiscoveryResult.Incomplete -> compiled = CompileResult.Unsupported(found.reason)
+                        null -> Unit
+                    }
                 }
                 when (compiled) {
                     is CompileResult.Unsupported -> edit(token) {
@@ -200,7 +214,7 @@ internal class CreationController(
                             description = it.description.ifBlank { compiled.template.description },
                             message = "等待设备操作通道",
                         ) }
-                        if (generate || prepare) {
+                        if (generate || (prepare && observed == null)) {
                             edit(token) { it.copy(phase = RunPhase.IDLE, message = "候选已生成，请确认后试运行。") }
                             return@launch
                         }
@@ -225,15 +239,19 @@ internal class CreationController(
                             ensureActive()
                             edit(token) {
                                 when (result) {
-                                    is EngineResult.Success -> it.copy(
+                                    is EngineResult.Success -> if (observed != null &&
+                                        result.snapshot.fields.associate { field -> field.key to field.value } != observed) {
+                                        it.copy(phase = RunPhase.NEEDS_USER, template = null, preview = null,
+                                            message = "两次独立读取结果不同，请重新生成候选。")
+                                    } else it.copy(
                                         phase = RunPhase.SUCCEEDED, preview = result.snapshot,
                                         message = "核验通过，请检查预览并确认保存。",
                                     )
                                     is EngineResult.NeedsUser -> it.copy(
-                                        phase = RunPhase.NEEDS_USER, message = result.message,
+                                        phase = RunPhase.NEEDS_USER, template = it.template.takeIf { observed == null }, message = result.message,
                                     )
                                     is EngineResult.Failure -> it.copy(
-                                        phase = RunPhase.FAILED, message = result.message,
+                                        phase = RunPhase.FAILED, template = it.template.takeIf { observed == null }, message = result.message,
                                     )
                                 }
                             }

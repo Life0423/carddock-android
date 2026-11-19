@@ -41,6 +41,7 @@ class PrototypeController(
     private val replacementTemplate: ((CardRecord, List<CardRecord>, Boolean) -> TemplateDefinition?)? = null,
     templateStore: TemplateStore? = null,
     personalCompiler: RuleCompiler = compiler,
+    discover: (suspend (String) -> com.life0423.carddock.core.port.DiscoveryResult?)? = null,
 ) {
     private val notice = MutableStateFlow<String?>(null)
     private val scenario = MutableStateFlow(DemoScenario.NORMAL)
@@ -56,7 +57,7 @@ class PrototypeController(
     }
 
     private val library = TemplateLibrary(templateStore)
-    private val creator = CreationController(compiler, personalCompiler, modelCompiler, engine, cards, lane, scope, now, newId, ::notify, library)
+    private val creator = CreationController(compiler, personalCompiler, modelCompiler, engine, cards, lane, scope, now, newId, ::notify, library, discover)
     private val editorState = combine(creator.draft, library.state, ::Pair)
     private val sequence = MutableStateFlow<SequenceStatus?>(null)
     private var sequenceJob: Job? = null

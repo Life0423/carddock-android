@@ -5,7 +5,7 @@ import com.life0423.carddock.core.model.LocalTarget
 import java.security.MessageDigest
 
 /** 一次读取的本机目标和模式。默认仍读取规则定义的字段。 */
-data class ReadOptions(val localTarget: LocalTarget? = null, val appPrice: Boolean = false, val requestedAt: Long? = null)
+data class ReadOptions(val localTarget: LocalTarget? = null, val appPrice: Boolean = false, val requestedAt: Long? = null, val reminderRoute: com.life0423.carddock.core.rule.ReminderRoute? = null)
 
 /** 观测号码和配置号码各自生成键，供引擎比对且避免号码进入快照。 */
 fun orderIdentity(number: String): String =

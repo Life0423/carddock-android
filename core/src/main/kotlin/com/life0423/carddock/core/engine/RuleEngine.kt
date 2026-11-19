@@ -43,7 +43,7 @@ class RuleEngine(
         onProgress(RunProgress(0, plan.steps.size, device.instruction(plan.sourceId, options)))
         currentCoroutineContext().ensureActive()
         val response = try {
-            device.inspect(plan.sourceId, plan.targetKey, options)
+            device.inspect(plan.sourceId, plan.targetKey, options.copy(reminderRoute = plan.reminderRoute))
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {

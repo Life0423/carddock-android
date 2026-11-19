@@ -14,6 +14,7 @@ data class RuleSpec(
     val sourceId: String,
     val targetKey: String,
     val steps: List<RuleStep>,
+    val reminderRoute: ReminderRoute? = null,
 )
 
 /** 持久化用的步骤。序列化名字是稳定协议，不能随 Kotlin 类名变化。 */
@@ -38,3 +39,11 @@ sealed interface RuleStep {
     @SerialName("requireField")
     data class RequireField(val outputKey: String) : RuleStep
 }
+
+
+/** 模型确认后的三个字段锚点。只持久化控件类型与结构，不保存节点序号或某次事件的文字。 */
+@Serializable
+data class ReminderRoute(val title: FieldAnchor, val start: FieldAnchor, val advance: FieldAnchor)
+
+@Serializable
+data class FieldAnchor(val role: String, val parentRole: String, val resource: String? = null)

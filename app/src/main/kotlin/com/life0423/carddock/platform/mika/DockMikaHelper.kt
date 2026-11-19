@@ -74,12 +74,19 @@ object DockMikaHelper {
 /** 助手只接受卡坞发来的请求。可信屏保留主屏焦点，系统不支持时直接失败。 */
 @RequiresApi(34)
 @SuppressLint("PrivateApi", "DiscouragedPrivateApi")
-private class DisplayService(shell: Context, private val uid: Int) : ICardDockDisplay.Stub() {
+private class DisplayService(private val shell: Context, private val uid: Int) : ICardDockDisplay.Stub() {
     private val displayManager = DisplayManager::class.java.getDeclaredConstructor(Context::class.java)
         .apply { isAccessible = true }.newInstance(shell)
     private val displays = mutableMapOf<Int, VirtualDisplay>()
     private val tasks = Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null)!!
     private val taskInfo = Class.forName("android.app.TaskInfo")
+
+    /** 通过所选应用的标准启动入口打开独立查询屏。 */
+    override fun openLauncher(surface: Surface, width: Int, height: Int, density: Int, targetPackage: String): Int {
+        check(Binder.getCallingUid() == uid)
+        val launcher = shell.packageManager.getLaunchIntentForPackage(targetPackage) ?: return -1
+        return open(surface, width, height, density, targetPackage, launcher)
+    }
 
     override fun openCainiao(surface: Surface, width: Int, height: Int, density: Int): Int =
         open(surface, width, height, density, CAINIAO_PACKAGE,

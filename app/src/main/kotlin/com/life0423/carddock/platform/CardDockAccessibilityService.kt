@@ -114,11 +114,11 @@ class CardDockAccessibilityService : AccessibilityService() {
         return result
     }
 
-    /** 用系统无障碍手势点按当前美团查询屏，用户主屏不接收此手势。 */
-    internal fun tapOrder(displayId: Int, target: DetailNode): Boolean {
+    /** 在指定查询屏定位可见节点，优先点击控件，必要时向该屏分派手势。 */
+    internal fun tapReadTarget(displayId: Int, expected: String, target: DetailNode): Boolean {
         if (displayId <= 0 || Build.VERSION.SDK_INT < 30) return false
         val box = target.bounds ?: return false
-        val root = backgroundRoot(displayId, MEITUAN_PACKAGE) ?: return false
+        val root = backgroundRoot(displayId, expected) ?: return false
         val matches = root.findAccessibilityNodeInfosByText(target.label)
         var point = box
         try {

@@ -15,3 +15,12 @@ sealed interface CompileResult {
 interface RuleCompiler {
     suspend fun compile(prompt: String): CompileResult
 }
+
+/** 首轮在独立后台屏学到的模板和当轮取值。常规规则引擎会重新打开来源并逐字段核对。 */
+data class DiscoveredTemplate(val template: TemplateDefinition, val observed: Map<String, String>)
+
+/** 返回 null 表示不支持此需求。读取失败返回原因，调用者保留可重试的草稿。 */
+sealed interface DiscoveryResult {
+    data class Found(val candidate: DiscoveredTemplate) : DiscoveryResult
+    data class Incomplete(val reason: String) : DiscoveryResult
+}

@@ -8,4 +8,5 @@ interface ICardDockDisplay {
     int openMeituan(in Surface surface, int width, int height, int density, String oid);
     void closeDisplay(int displayId);
     int openMeituanOrders(in Surface surface, int width, int height, int density);
+    int openLauncher(in Surface surface, int width, int height, int density, String targetPackage);
 }

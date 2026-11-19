@@ -9,6 +9,8 @@ import com.life0423.carddock.core.model.TemplateKind
 import com.life0423.carddock.core.port.CompileResult
 import com.life0423.carddock.core.port.DeviceGateway
 import com.life0423.carddock.core.port.DeviceResponse
+import com.life0423.carddock.core.port.DiscoveredTemplate
+import com.life0423.carddock.core.port.DiscoveryResult
 import com.life0423.carddock.core.port.DeviceSnapshot
 import com.life0423.carddock.core.port.ReadOptions
 import com.life0423.carddock.core.port.RuleCompiler
@@ -26,6 +28,40 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PersonalTemplateTest {
+    /** 首轮学习出的值不进入规则；独立重跑不一致时不能留下可保存的候选。 */
+    @Test fun discoveryMustMatchIndependentReplay() = runTest {
+        val rule = RuleSpec(id = "agenda", sourceId = "calendar", targetKey = "agenda", steps = listOf(
+            RuleStep.AssertTarget("agenda"), RuleStep.ReadField("name", "name", "名称")))
+        val template = TemplateDefinition("agenda", "提醒", "今日通知", TemplateKind.REMINDER, "看提醒", rule)
+        var value = "已变更"
+        val device = object : DeviceGateway {
+            override suspend fun inspect(sourceId: String, targetKey: String) =
+                DeviceResponse.Ready(DeviceSnapshot(sourceId, targetKey, mapOf("name" to value)))
+        }
+        val compiler = object : RuleCompiler {
+            override suspend fun compile(prompt: String) = CompileResult.Unsupported("无固定模板")
+        }
+        val controller = PrototypeController(MemoryCardStore(emptyList()), compiler, RuleEngine(device),
+            emptyList(), backgroundScope, discover = {
+                DiscoveryResult.Found(DiscoveredTemplate(template, mapOf("name" to "样本")))
+            })
+        controller.initialize()
+        with(controller.actions) {
+            openTemplateEditor(null)
+            changePrompt("看提醒")
+            prepareTemplate()
+            runCurrent()
+            assertEquals(RunPhase.NEEDS_USER, controller.state.value.draft?.phase)
+            assertNull(controller.state.value.draft?.template)
+            assertNull(controller.state.value.draft?.preview)
+            value = "样本"
+            prepareTemplate()
+            runCurrent()
+            assertEquals(RunPhase.SUCCEEDED, controller.state.value.draft?.phase)
+            assertEquals("样本", controller.state.value.draft?.preview?.fields?.single()?.value)
+        }
+    }
+
     @Test fun verifiedDefinitionAndCardHaveSeparateStorageAndVersion() = runTest {
         val rule = RuleSpec(id = "order", sourceId = "orders", targetKey = "completed", steps = listOf(
             RuleStep.AssertTarget("completed"), RuleStep.ReadField("status", "status", "状态"),

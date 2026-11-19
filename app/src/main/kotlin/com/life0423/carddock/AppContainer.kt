@@ -49,7 +49,7 @@ class AppContainer(private val context: Context) {
     // 演示文件给人读，所以排版。未知字段显式拒绝，避免以后多出来的键被静默丢掉。
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = false }
     private val device = DemoDeviceGateway()
-    private val nativeDevice = MikaBackgroundQuery(context) { dockWindowFocused }
+    internal val nativeDevice = MikaBackgroundQuery(context) { dockWindowFocused }
     private val meituan = MeituanGateway()
     @Volatile internal var dockWindowFocused = false
     private val jd = JdGateway(context) { dockWindowFocused }
@@ -84,7 +84,12 @@ class AppContainer(private val context: Context) {
                 }
             } else DeviceResponse.Failed("此卡片缺少本机授权订单号码，请重新创建。")
             JD_PACKAGE -> jd.inspect(targetKey, options.appPrice, options.requestedAt)
-            else -> device.inspect(sourceId, targetKey)
+            else -> if (targetKey == "visible-reminder" && options.reminderRoute != null) {
+                val permitted = context.packageManager.queryIntentActivities(android.content.Intent(android.content.Intent.ACTION_MAIN)
+                    .addCategory(android.content.Intent.CATEGORY_APP_CALENDAR), 0).any { it.activityInfo.packageName == sourceId }
+                if (!permitted) DeviceResponse.NeedsUser("请重新选择本机提醒来源。")
+                else withContext(Dispatchers.IO) { nativeDevice.reminderTrial(sourceId, options.reminderRoute) }
+            } else device.inspect(sourceId, targetKey)
         }
     }
 
@@ -94,6 +99,7 @@ class AppContainer(private val context: Context) {
         templateStore = AtomicTemplateStore(context, json),
         compiler = MockRuleCompiler(templates),
         personalCompiler = PersonalRuleCompiler,
+        discover = { demand -> discoverReminder(context, modelSettings, nativeDevice, demand) },
         engine = RuleEngine(routedDevice),
         templates = templates,
         scope = applicationScope,

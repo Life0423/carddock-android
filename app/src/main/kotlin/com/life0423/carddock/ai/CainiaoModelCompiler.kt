@@ -31,21 +31,8 @@ internal class CainiaoModelCompiler(private val settings: ModelSettings) : RuleC
             return CompileResult.Unsupported("模型配置无法读取，请在“我的”重新保存。")
         } ?: return CompileResult.Unsupported("请先在“我的”保存模型配置。")
         return withContext(Dispatchers.IO) {
-            val connection = URI(config.endpoint + "/chat/completions").toURL().openConnection() as HttpURLConnection
-            connection.instanceFollowRedirects = false
-            connection.connectTimeout = 10_000
-            connection.readTimeout = 20_000
-            connection.requestMethod = "POST"
-            connection.doOutput = true
-            connection.setRequestProperty("Authorization", "Bearer ${config.key}")
-            connection.setRequestProperty("Content-Type", "application/json")
-            val body = buildJsonObject {
-                put("model", config.model)
-                put("stream", false)
-                putJsonArray("messages") {
-                    addJsonObject {
-                        put("role", "user")
-                        put("content", """
+            try {
+                compileCainiaoCandidate(requestModel(config, """
                             为菜鸟明确的“暂无待取包裹”状态生成卡坞 RuleSpec JSON。只输出 JSON。
                             schemaVersion 固定 1，id 使用短英文标识，sourceId 为 com.cainiao.wireless，
                             targetKey 为 cainiao.pickup.empty。steps 按顺序包含：
@@ -53,28 +40,12 @@ internal class CainiaoModelCompiler(private val settings: ModelSettings) : RuleC
                             {"type":"readField","sourceField":"status","outputKey":"status","label":"待取状态"}
                             {"type":"requireField","outputKey":"status"}
                             无其他字段或步骤。
-                        """.trimIndent())
-                    }
-                }
-            }
-            try {
-                connection.outputStream.use { it.write(body.toString().encodeToByteArray()) }
-                val status = connection.responseCode
-                if (status !in 200..299) {
-                    return@withContext CompileResult.Unsupported("模型服务返回 HTTP $status，请检查配置。")
-                }
-                val response = connection.inputStream.bufferedReader().use { it.readBounded(32 * 1024) }
-                val root = Json.parseToJsonElement(response) as? JsonObject
-                val choice = (root?.get("choices") as? JsonArray)?.firstOrNull() as? JsonObject
-                val message = choice?.get("message") as? JsonObject
-                val content = (message?.get("content") as? JsonPrimitive)?.takeIf { it.isString }?.content.orEmpty()
-                compileCainiaoCandidate(content)
-            } catch (_: IOException) {
-                CompileResult.Unsupported("模型连接失败，请检查服务后重试。")
+                        """.trimIndent()))
+            } catch (failure: IOException) {
+                CompileResult.Unsupported(failure.message?.takeIf { Regex("HTTP [0-9]{3}").matches(it) }
+                    ?.let { "模型服务返回 $it，请检查配置。" } ?: "模型连接失败，请检查服务后重试。")
             } catch (_: IllegalArgumentException) {
                 CompileResult.Unsupported("模型响应格式无效，未执行。")
-            } finally {
-                connection.disconnect()
             }
         }
     }
@@ -94,4 +65,39 @@ internal fun compileCainiaoCandidate(content: String): CompileResult {
         rule.steps != baseline.steps
     ) return CompileResult.Unsupported("模型候选超出菜鸟只读范围，未执行。")
     return CompileResult.Success(cainiaoEmptyTemplate.copy(rule = rule))
+}
+
+/** 共用已配置的模型连接；调用方负责构造脱敏输入及校验返回值。 */
+internal fun requestModel(config: ModelConfig, instruction: String): String {
+    val connection = URI(config.endpoint + "/chat/completions").toURL().openConnection() as HttpURLConnection
+    connection.instanceFollowRedirects = false
+    connection.connectTimeout = 10_000
+    connection.readTimeout = 20_000
+    connection.requestMethod = "POST"
+    connection.doOutput = true
+    connection.setRequestProperty("Authorization", "Bearer ${config.key}")
+    connection.setRequestProperty("Content-Type", "application/json")
+    val body = buildJsonObject {
+        put("model", config.model)
+        put("stream", false)
+        putJsonArray("messages") {
+            addJsonObject {
+                put("role", "user")
+                put("content", instruction)
+            }
+        }
+    }
+    try {
+        connection.outputStream.use { it.write(body.toString().encodeToByteArray()) }
+        val status = connection.responseCode
+        if (status !in 200..299) {
+            throw IOException("HTTP $status")
+        }
+        val response = connection.inputStream.bufferedReader().use { it.readBounded(32 * 1024) }
+        val root = Json.parseToJsonElement(response) as? JsonObject
+        val choice = (root?.get("choices") as? JsonArray)?.firstOrNull() as? JsonObject
+        val message = choice?.get("message") as? JsonObject
+        val content = (message?.get("content") as? JsonPrimitive)?.takeIf { it.isString }?.content.orEmpty()
+        return content
+    } finally { connection.disconnect() }
 }
