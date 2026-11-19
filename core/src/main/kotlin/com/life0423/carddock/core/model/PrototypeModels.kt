@@ -34,6 +34,7 @@ data class CardSnapshot(
     val fields: List<FieldValue>,
     val fetchedAt: Long,
     val sourceLabel: String = "模拟设备 · 演示数据",
+    val evidenceDigest: String? = null,
 )
 
 /**

@@ -87,7 +87,10 @@ class CardDockAccessibilityService : AccessibilityService() {
                 val label = if (visible) (node.text ?: node.contentDescription)?.toString().orEmpty()
                     .replace(formatCharacters, "").trim() else ""
                 val bounds = if (geometry) android.graphics.Rect().also(node::getBoundsInScreen) else null
-                rows += DetailNode(parent, node.viewIdResourceName, node.className?.toString(), label, visible, bounds, node.isScrollable, node.isSelected)
+                rows += DetailNode(parent, node.viewIdResourceName, node.className?.toString(), label, visible, bounds, node.isScrollable, node.isSelected,
+                    node.actionList.contains(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_BACKWARD),
+                    node.actionList.contains(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD),
+                    node.collectionInfo?.rowCount, node.collectionItemInfo?.rowIndex, node.isClickable, node.drawingOrder, node.isChecked)
                 for (child in 0 until node.childCount) node.getChild(child)?.let { visit(it, index) }
             } finally {
                 node.recycle()
@@ -141,6 +144,20 @@ class CardDockAccessibilityService : AccessibilityService() {
         val gesture = android.accessibilityservice.GestureDescription.Builder().setDisplayId(displayId)
             .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 70)).build()
         return dispatchGesture(gesture, null, null)
+    }
+
+    /** 在来源集合的可见边界内滚动半屏，保留重叠行供调用方逐单核验。 */
+    internal fun advanceCollection(displayId: Int, source: String, box: android.graphics.Rect): Boolean {
+        if (displayId <= 0 || android.os.Build.VERSION.SDK_INT < 30) return false
+        val root = backgroundRoot(displayId, source) ?: return false
+        root.recycle()
+        if (box.isEmpty) return false
+        val path = android.graphics.Path().apply {
+            moveTo(box.exactCenterX(), box.top + box.height() * .72f)
+            lineTo(box.exactCenterX(), box.top + box.height() * .32f)
+        }
+        return dispatchGesture(android.accessibilityservice.GestureDescription.Builder().setDisplayId(displayId)
+            .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 480)).build(), null, null)
     }
 
     /** 仅点击同一后台窗口里唯一且可见的白名单入口。 */

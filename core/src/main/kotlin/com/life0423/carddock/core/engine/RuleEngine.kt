@@ -43,7 +43,7 @@ class RuleEngine(
         onProgress(RunProgress(0, plan.steps.size, device.instruction(plan.sourceId, options)))
         currentCoroutineContext().ensureActive()
         val response = try {
-            device.inspect(plan.sourceId, plan.targetKey, options.copy(reminderRoute = plan.reminderRoute, countRoute = plan.countRoute))
+            device.inspect(plan.sourceId, plan.targetKey, options.copy(reminderRoute = plan.reminderRoute, countRoute = plan.countRoute, orderPath = plan.orderPath))
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -101,6 +101,6 @@ class RuleEngine(
             currentCoroutineContext().ensureActive()
         }
 
-        return EngineResult.Success(CardSnapshot(fields = values.values.toList(), fetchedAt = now(), sourceLabel = snapshot.sourceLabel), snapshot.appPrice)
+        return EngineResult.Success(CardSnapshot(fields = values.values.toList(), fetchedAt = now(), sourceLabel = snapshot.sourceLabel, evidenceDigest = snapshot.evidenceDigest), snapshot.appPrice)
     }
 }

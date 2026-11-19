@@ -73,6 +73,13 @@ class AppContainer(private val context: Context) {
             inspect(sourceId, targetKey, ReadOptions())
 
         override suspend fun inspect(sourceId: String, targetKey: String, options: ReadOptions): DeviceResponse {
+            if (targetKey == com.life0423.carddock.platform.MONTHLY_ORDERS) {
+                val path = options.orderPath ?: return DeviceResponse.NeedsUser("缺少已核验的订单入口。")
+                val until = java.time.Instant.ofEpochMilli(options.requestedAt ?: System.currentTimeMillis()).atZone(java.time.ZoneId.systemDefault())
+                return withContext(Dispatchers.IO) {
+                    nativeDevice.monthlyOrders(sourceId,com.life0423.carddock.platform.OrderCollection(sourceId,until,path,options.compareFilter))
+                }
+            }
             if (targetKey == com.life0423.carddock.platform.COUNT_TARGET) {
                 val route = options.countRoute ?: return DeviceResponse.NeedsUser("缺少数量字段，请重新试运行。")
                 return if (context.packageManager.getLaunchIntentForPackage(sourceId) == null) DeviceResponse.NeedsUser("找不到模板指定的应用。")
@@ -106,8 +113,9 @@ class AppContainer(private val context: Context) {
         templateStore = AtomicTemplateStore(context, json),
         compiler = MockRuleCompiler(templates),
         personalCompiler = PersonalRuleCompiler,
-        discover = { demand -> discoverReminder(context, modelSettings, nativeDevice, demand)
-            ?: discoverCount(context, modelSettings, nativeDevice, demand) },
+        discover = { demand, compareFilter -> discoverReminder(context, modelSettings, nativeDevice, demand)
+            ?: discoverCount(context, modelSettings, nativeDevice, demand)
+            ?: discoverOrders(context, modelSettings, nativeDevice, demand, compareFilter) },
         engine = RuleEngine(routedDevice),
         templates = templates,
         scope = applicationScope,

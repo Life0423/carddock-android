@@ -42,7 +42,7 @@ class PersonalTemplateTest {
             override suspend fun compile(prompt: String) = CompileResult.Unsupported("无固定模板")
         }
         val controller = PrototypeController(MemoryCardStore(emptyList()), compiler, RuleEngine(device),
-            emptyList(), backgroundScope, discover = {
+            emptyList(), backgroundScope, discover = { _, _ ->
                 DiscoveryResult.Found(DiscoveredTemplate(template, mapOf("name" to "样本")))
             })
         controller.initialize()
@@ -79,7 +79,7 @@ class PersonalTemplateTest {
             override suspend fun compile(prompt: String) = CompileResult.Unsupported("需要试查")
         }
         val controller = PrototypeController(MemoryCardStore(emptyList()),compiler,RuleEngine(gateway),
-            emptyList(),backgroundScope,discover = { DiscoveryResult.Demonstrate(choices) })
+            emptyList(),backgroundScope,discover = { _, _ -> DiscoveryResult.Demonstrate(choices) })
         controller.initialize()
         with(controller.actions) {
             openTemplateEditor(null)

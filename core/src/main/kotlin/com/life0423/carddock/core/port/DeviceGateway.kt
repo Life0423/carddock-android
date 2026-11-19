@@ -6,7 +6,8 @@ import java.security.MessageDigest
 
 /** 一次读取的本机目标和模式。默认仍读取规则定义的字段。 */
 data class ReadOptions(val localTarget: LocalTarget? = null, val appPrice: Boolean = false, val requestedAt: Long? = null, val reminderRoute: com.life0423.carddock.core.rule.ReminderRoute? = null,
-    val countRoute: com.life0423.carddock.core.rule.CountRoute? = null)
+    val countRoute: com.life0423.carddock.core.rule.CountRoute? = null, val orderPath: List<String>? = null,
+    val compareFilter: Boolean = false)
 
 /** 观测号码和配置号码各自生成键，供引擎比对且避免号码进入快照。 */
 fun orderIdentity(number: String): String =
@@ -23,6 +24,7 @@ data class DeviceSnapshot(
     val fields: Map<String, String>,
     val sourceLabel: String = "模拟设备 · 演示数据",
     val appPrice: AppPrice? = null,
+    val evidenceDigest: String? = null,
 )
 
 /** 一次观察的三种结果。Ready 仍要经过引擎的来源和目标核对，不能直接写成卡片快照。 */

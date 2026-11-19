@@ -40,7 +40,7 @@ internal class CreationController(
     private val newId: () -> String,
     private val notify: (String) -> Unit,
     private val library: TemplateLibrary,
-    private val discover: (suspend (String) -> DiscoveryResult?)?,
+    private val discover: (suspend (String, Boolean) -> DiscoveryResult?)?,
 ) {
     private val mutableDraft = MutableStateFlow<CreationDraft?>(null)
     val draft = mutableDraft.asStateFlow()
@@ -169,7 +169,7 @@ internal class CreationController(
     }
 
     /** 已有仍活跃的试运行或保存时直接返回。取消收尾中 isActive 为 false，这道检查让开。空白提示词不改阶段。 */
-    fun trial(generate: Boolean = false, prepare: Boolean = false, demonstration: Int? = null) {
+    fun trial(generate: Boolean = false, prepare: Boolean = false, demonstration: Int? = null, compareFilter: Boolean = false) {
         val current = draft.value ?: return
         val shown = demonstration?.let { current.demonstrations.getOrNull(it) ?: return }
         if (work?.isActive == true || current.prompt.isBlank()) return
@@ -185,6 +185,7 @@ internal class CreationController(
         work = scope.launch {
             try {
                 // 编译放在通道锁外，匹配模板时不堵住正在刷新的卡片。
+                var discovery = shown
                 var observed = shown?.observed
                 var compiled = when {
                     shown != null -> CompileResult.Success(shown.template)
@@ -196,8 +197,9 @@ internal class CreationController(
                 }
                 if (prepare && compiled is CompileResult.Unsupported && discover != null) {
                     edit(token) { it.copy(phase = RunPhase.RUNNING, message = "正在后台试查需求…") }
-                    when (val found = lane.withLock { discover.invoke(current.prompt.trim()) }) {
+                    when (val found = lane.withLock { discover.invoke(current.prompt.trim(), compareFilter) }) {
                         is DiscoveryResult.Found -> {
+                            discovery = found.candidate
                             observed = found.candidate.observed
                             compiled = CompileResult.Success(found.candidate.template)
                         }
@@ -240,14 +242,15 @@ internal class CreationController(
                             // 排队等锁期间可能已被关闭。拿到锁后再检查，避免把取消写成一次读取。
                             ensureActive()
                             edit(token) { it.copy(phase = RunPhase.RUNNING, message = "正在读取页面…") }
-                            val result = engine.execute(compiled.template.rule, ReadOptions(localTarget = target)) { progress ->
+                            val result = engine.execute(compiled.template.rule, ReadOptions(localTarget = target, requestedAt = discovery?.cutoff, compareFilter = compareFilter)) { progress ->
                                 edit(token) { it.copy(message = progress.message) }
                             }
                             ensureActive()
                             edit(token) {
                                 when (result) {
                                     is EngineResult.Success -> if (observed != null &&
-                                        result.snapshot.fields.associate { field -> field.key to field.value } != observed) {
+                                        (result.snapshot.fields.associate { field -> field.key to field.value } != observed ||
+                                            result.snapshot.evidenceDigest != discovery?.evidenceDigest)) {
                                         it.copy(phase = RunPhase.NEEDS_USER, template = null, preview = null,
                                             message = "两次独立读取结果不同，请重新生成候选。")
                                     } else it.copy(

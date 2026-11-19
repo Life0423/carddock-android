@@ -41,7 +41,7 @@ class PrototypeController(
     private val replacementTemplate: ((CardRecord, List<CardRecord>, Boolean) -> TemplateDefinition?)? = null,
     templateStore: TemplateStore? = null,
     personalCompiler: RuleCompiler = compiler,
-    discover: (suspend (String) -> com.life0423.carddock.core.port.DiscoveryResult?)? = null,
+    discover: (suspend (String, Boolean) -> com.life0423.carddock.core.port.DiscoveryResult?)? = null,
 ) {
     private val notice = MutableStateFlow<String?>(null)
     private val scenario = MutableStateFlow(DemoScenario.NORMAL)
@@ -93,6 +93,7 @@ class PrototypeController(
         changeOrderNumber = creator::changeOrderNumber,
         demonstrateField = { creator.trial(demonstration = it) },
         prepareTemplate = { creator.trial(prepare = true) },
+        compareFilterForTrial = { creator.trial(prepare = true, compareFilter = true) },
         generateCandidate = { creator.trial(generate = true) },
         changeCardRule = { id, rollback ->
             if (!resetting && sequence.value == null && !runs.hasLiveJob(id)) {

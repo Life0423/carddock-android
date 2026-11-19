@@ -79,6 +79,7 @@ data class PrototypeActions(
     val changeOrderNumber: (String) -> Unit = {},
     val demonstrateField: (Int) -> Unit = {},
     val prepareTemplate: () -> Unit = {},
+    val compareFilterForTrial: () -> Unit = {},
     val generateCandidate: () -> Unit = {},
     val verifyPrice: (String) -> Unit = {},
     val refreshSequence: (List<String>) -> Unit = {},

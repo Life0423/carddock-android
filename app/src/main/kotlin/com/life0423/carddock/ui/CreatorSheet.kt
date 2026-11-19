@@ -29,6 +29,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -228,6 +229,9 @@ internal fun CreatorScreen(
 
                 if (draft.phase == RunPhase.NEEDS_USER) {
                     Text("继续后会重新读取并核验结果。", color = DockColors.Muted, style = MaterialTheme.typography.bodySmall)
+                }
+                if (editingTemplate && draft.message == com.life0423.carddock.platform.FILTER_APPEARANCE_REQUIRED && !busy) {
+                    OutlinedButton(onClick = actions.compareFilterForTrial) { Text("允许本次在本机比对筛选项并重试") }
                 }
                 if (draft.message.isNotBlank()) {
                     Text(

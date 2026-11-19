@@ -17,7 +17,8 @@ interface RuleCompiler {
 }
 
 /** 首轮在独立后台屏学到的模板和当轮取值。常规规则引擎会重新打开来源并逐字段核对。 */
-data class DiscoveredTemplate(val template: TemplateDefinition, val observed: Map<String, String>)
+data class DiscoveredTemplate(val template: TemplateDefinition, val observed: Map<String, String>,
+    val cutoff: Long? = null, val evidenceDigest: String? = null)
 
 /** 返回 null 表示不支持此需求。读取失败返回原因，调用者保留可重试的草稿。 */
 sealed interface DiscoveryResult {

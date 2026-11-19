@@ -99,3 +99,10 @@ internal fun countTemplate(source: String, demand: String, route: com.life0423.c
     TemplateDefinition(id = "personal-count", title = route.subject + "数量", kind = TemplateKind.QUERY,
         description = "核对" + (route.page?.plus("页中的") ?: "首页的") + route.subject + "数量", examplePrompt = demand,
         rule = nativeRule("visible-count-v1", source, com.life0423.carddock.platform.COUNT_TARGET, "quantity" to "数量").copy(countRoute = route))
+
+/** 汇总卡只保留统计口径和复跑路线，订单明细只存在于当轮账本。 */
+internal fun monthlyTemplate(source: String,demand: String,path: List<String>) =
+    TemplateDefinition(id="personal-monthly-orders", title="近月已完成外卖实付",kind=TemplateKind.QUERY,
+        description="按下单时间核对滚动一个自然月，合计退款前原实付。", examplePrompt=demand,
+        rule=nativeRule("monthly-orders-v1",source,com.life0423.carddock.platform.MONTHLY_ORDERS,
+            "paid" to "原实付合计（元）","orders" to "已完成外卖（单）","period" to "统计区间").copy(orderPath=path))

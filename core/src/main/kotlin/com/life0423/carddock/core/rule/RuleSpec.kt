@@ -16,6 +16,7 @@ data class RuleSpec(
     val steps: List<RuleStep>,
     val countRoute: CountRoute? = null,
     val reminderRoute: ReminderRoute? = null,
+    val orderPath: List<String>? = null,
 )
 
 /** 持久化用的步骤。序列化名字是稳定协议，不能随 Kotlin 类名变化。 */

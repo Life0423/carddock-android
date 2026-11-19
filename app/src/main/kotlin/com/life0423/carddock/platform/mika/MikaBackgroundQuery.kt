@@ -84,6 +84,23 @@ internal class MikaBackgroundQuery(private val context: Context, private val foc
                 tap = { node, cell -> connected() && reader.tapReadTarget(id, source, node, cell) }, choose = choose)
         }
 
+    /** 每笔详情单独建立后台屏；同一查询的路线、跨页清单和截止点保存在 scan。 */
+    @android.annotation.SuppressLint("NewApi")
+    suspend fun monthlyOrders(source: String, scan: com.life0423.carddock.platform.OrderCollection,
+        choose: ((List<String>) -> String?)? = null): DeviceResponse {
+        do {
+            val result = query("订单来源", { helper, surface, w, h, dpi -> helper.openLauncher(surface,w,h,dpi,source) }, tall = true) {
+                reader, id, connected, frame -> scan.runWindow(connected,
+                    observe = { reader.clearCache(); reader.observeDetail(source,id,geometry=true) },
+                    tap = { connected() && reader.tapReadTarget(id,source,it,it.bounds) },
+                    scroll = { connected() && it.bounds?.let { box -> reader.advanceCollection(id,source,box) } == true }, choose,
+                    sample = if (scan.compareFilter) frame::buttonColors else null,
+                    panelVisible = { frame.enablePanel(scan.compareFilter && it) })
+            }
+            if (!scan.anotherWindow || result !is DeviceResponse.NeedsUser) return result
+        } while (true)
+    }
+
     suspend fun meituan(oid: String): DeviceResponse = query(
         "美团",
         { shell, surface, width, height, density -> shell.openMeituan(surface, width, height, density, oid) },
@@ -127,8 +144,8 @@ internal class MikaBackgroundQuery(private val context: Context, private val foc
         // 美团展开后需要同时观察状态、号码和时间。用更高的屏幕给同一个详情窗口留足可见区域。
         val height = if (tall) width * 5 / 2 else width * 2
         val sink = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, if (checkFilters) 3 else 2)
-        val filterFrame = FilterFrame()
         val frames = HandlerThread("carddock-display").apply { start() }
+        val filterFrame = FilterFrame(sink.surface, Handler(frames.looper))
         try {
             sink.setOnImageAvailableListener({ it.acquireLatestImage()?.let { image -> if (checkFilters) filterFrame.replace(image) else image.close() } }, Handler(frames.looper))
             val id = open(shell, sink.surface, width, height, metrics.densityDpi * width / metrics.widthPixels)
@@ -162,7 +179,7 @@ internal class MikaBackgroundQuery(private val context: Context, private val foc
 }
 
 /** 仅保留后台屏的最近一帧，在两个筛选项文字左侧比较实测按钮底色。图像不落盘。 */
-private class FilterFrame {
+private class FilterFrame(private val surface: Surface, private val handler: Handler) {
     private var latest: android.media.Image? = null
 
     @Synchronized fun replace(image: android.media.Image?) {
@@ -170,23 +187,66 @@ private class FilterFrame {
         latest = image
     }
 
-    @Synchronized fun selection(node: com.life0423.carddock.platform.DetailNode): Boolean? {
+    @Volatile private var panel = false
+
+    fun enablePanel(on: Boolean) {
+        panel = on
+    }
+
+    /** 静止面板不会持续产帧。按需复制已确认的两个文字框，不保留整屏图片。 */
+    suspend fun buttonColors(nodes: List<com.life0423.carddock.platform.DetailNode>): List<Int>? {
+        if (!panel) return null
+        val result = mutableListOf<Int>()
+        for (node in nodes) {
+            val box = node.bounds ?: return null
+            if (box.width() < 8 || box.height() < 4) return null
+            val bitmap = android.graphics.Bitmap.createBitmap(box.width(), box.height(), android.graphics.Bitmap.Config.ARGB_8888)
+            val color = kotlinx.coroutines.suspendCancellableCoroutine<Int?> { continuation ->
+                android.view.PixelCopy.request(surface, box, bitmap, { code ->
+                    val value = if (panel && continuation.isActive && code == android.view.PixelCopy.SUCCESS)
+                        buttonAppearance(bitmap) else null
+                    bitmap.recycle()
+                    if (continuation.isActive) continuation.resumeWith(Result.success(value))
+                }, handler)
+            } ?: return null
+            result += color
+        }
+        return result
+    }
+
+    private fun buttonAppearance(bitmap: android.graphics.Bitmap): Int {
+        val frequencies = mutableMapOf<Int,Int>()
+        for (y in 1 until bitmap.height-1 step 2) {
+            for (x in 1 until bitmap.width-1 step 2) {
+                val pixel = bitmap.getPixel(x,y)
+                val color = ((pixel shr 12) and 0xf00) or ((pixel shr 8) and 0xf0) or ((pixel shr 4) and 0xf)
+                frequencies[color] = (frequencies[color] ?: 0) + 1
+            }
+        }
+        val colors = frequencies.entries.sortedWith(compareByDescending<Map.Entry<Int,Int>> { it.value }.thenBy { it.key })
+        return colors.first().key * 4096 + (colors.getOrNull(1)?.key ?: colors.first().key)
+    }
+
+    @Synchronized fun selection(node: com.life0423.carddock.platform.DetailNode): Boolean? =
+        when (sampleColor(node)) {
+            0xfffadb -> true
+            0xffffff -> false
+            else -> null
+        }
+
+    private fun sampleColor(node: com.life0423.carddock.platform.DetailNode): Int? {
         val image = latest ?: return null
         val box = node.bounds ?: return null
         val plane = image.planes.first()
         val y = box.centerY()
-        val colors = listOf(4, 8, 12).map { offset ->
-            val x = box.left - offset
+        val positions = listOf(box.left-4,box.left-8,box.left-12)
+        val colors = positions.map { x ->
             if (x !in 0 until image.width || y !in 0 until image.height) return null
             val pos = plane.rowStride * y + plane.pixelStride * x
             val bytes = plane.buffer
             ((bytes.get(pos).toInt() and 255) shl 16) or
                 ((bytes.get(pos+1).toInt() and 255) shl 8) or (bytes.get(pos+2).toInt() and 255)
         }
-        return when (colors.distinct().singleOrNull()) {
-            0xfffadb -> true
-            0xffffff -> false
-            else -> null
-        }
+        return colors.distinct().singleOrNull()
     }
 }
