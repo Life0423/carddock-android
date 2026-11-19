@@ -62,6 +62,46 @@ class PersonalTemplateTest {
         }
     }
 
+    /** 歧义仅允许从本轮候选示范一次。选择本身不能替代规则引擎的独立实读。 */
+    @Test fun demonstrationReplaysFieldBeforePreview() = runTest {
+        val rule = RuleSpec(id = "test", sourceId = "local", targetKey = "counts", steps = listOf(
+            RuleStep.AssertTarget("counts"), RuleStep.ReadField("quantity", "quantity", "数量")))
+        val template = TemplateDefinition("test","分类数量","查看数量",TemplateKind.QUERY,"查询",rule)
+        val choices = listOf("3 项","7 项").map { DiscoveredTemplate(template, mapOf("quantity" to it)) }
+        var calls = 0
+        val gateway = object : DeviceGateway {
+            override suspend fun inspect(sourceId: String, targetKey: String): DeviceResponse {
+                calls++
+                return DeviceResponse.Ready(DeviceSnapshot(sourceId, targetKey, mapOf("quantity" to "7 项")))
+            }
+        }
+        val compiler = object : RuleCompiler {
+            override suspend fun compile(prompt: String) = CompileResult.Unsupported("需要试查")
+        }
+        val controller = PrototypeController(MemoryCardStore(emptyList()),compiler,RuleEngine(gateway),
+            emptyList(),backgroundScope,discover = { DiscoveryResult.Demonstrate(choices) })
+        controller.initialize()
+        with(controller.actions) {
+            openTemplateEditor(null)
+            changePrompt("查询")
+            prepareTemplate()
+            runCurrent()
+            assertEquals(2,controller.state.value.draft?.demonstrations?.size)
+            assertNull(controller.state.value.draft?.preview)
+            changePrompt("新查询")
+            demonstrateField(1)
+            runCurrent()
+            assertEquals(0,calls)
+            prepareTemplate()
+            runCurrent()
+            demonstrateField(1)
+            runCurrent()
+            assertEquals(1,calls)
+            assertEquals(RunPhase.SUCCEEDED,controller.state.value.draft?.phase)
+            assertEquals("7 项",controller.state.value.draft?.preview?.fields?.single()?.value)
+        }
+    }
+
     @Test fun verifiedDefinitionAndCardHaveSeparateStorageAndVersion() = runTest {
         val rule = RuleSpec(id = "order", sourceId = "orders", targetKey = "completed", steps = listOf(
             RuleStep.AssertTarget("completed"), RuleStep.ReadField("status", "status", "状态"),

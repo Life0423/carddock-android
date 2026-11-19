@@ -91,6 +91,7 @@ class PrototypeController(
         } },
         changeRouteOid = creator::changeRouteOid,
         changeOrderNumber = creator::changeOrderNumber,
+        demonstrateField = { creator.trial(demonstration = it) },
         prepareTemplate = { creator.trial(prepare = true) },
         generateCandidate = { creator.trial(generate = true) },
         changeCardRule = { id, rollback ->

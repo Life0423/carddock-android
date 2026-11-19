@@ -1,5 +1,8 @@
 package com.life0423.carddock.platform.mika
 
+import com.life0423.carddock.core.rule.CountRoute
+import com.life0423.carddock.platform.CountField
+import com.life0423.carddock.platform.readVisibleCount
 import com.life0423.carddock.core.rule.ReminderRoute
 import com.life0423.carddock.platform.UpcomingReminder
 import android.content.Context
@@ -70,6 +73,16 @@ internal class MikaBackgroundQuery(private val context: Context, private val foc
             if (result !is DeviceResponse.Ready || !agenda.hasMore) return result
         } while (true)
     }
+
+    /** 学习与回放都从启动入口打开新的后台屏。读数期间只操作用户指定的导航页签。 */
+    @android.annotation.SuppressLint("NewApi") // query 仅在 API 34 及以上建立后台屏。
+    suspend fun count(source: String, page: String?, subject: String, saved: CountRoute? = null,
+        choose: ((List<CountField>, String) -> CountField?)? = null): DeviceResponse =
+        query("数量来源", { helper, surface, w, h, dpi -> helper.openLauncher(surface, w, h, dpi, source) }) { reader, id, connected, _ ->
+            readVisibleCount(source, page, subject, saved, connected,
+                observe = { reader.clearCache(); reader.observeDetail(source, id, geometry = true) },
+                tap = { node, cell -> connected() && reader.tapReadTarget(id, source, node, cell) }, choose = choose)
+        }
 
     suspend fun meituan(oid: String): DeviceResponse = query(
         "美团",

@@ -14,6 +14,7 @@ data class RuleSpec(
     val sourceId: String,
     val targetKey: String,
     val steps: List<RuleStep>,
+    val countRoute: CountRoute? = null,
     val reminderRoute: ReminderRoute? = null,
 )
 
@@ -47,3 +48,7 @@ data class ReminderRoute(val title: FieldAnchor, val start: FieldAnchor, val adv
 
 @Serializable
 data class FieldAnchor(val role: String, val parentRole: String, val resource: String? = null)
+
+/** 用户指定的页面及分类和本机学到的同组字段锚点。数值从每次查询的页面读取。 */
+@Serializable
+data class CountRoute(val page: String?, val subject: String, val label: FieldAnchor, val quantity: FieldAnchor)

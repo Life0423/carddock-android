@@ -93,3 +93,9 @@ internal fun reminderTemplate(source: String, demand: String, route: com.life042
     TemplateDefinition(id = "personal-reminder", title = "今日可见提醒", kind = TemplateKind.REMINDER,
         description = "查看今日列表中可核验的下一次通知", examplePrompt = demand,
         rule = nativeRule("reminder-route-v1", source, "visible-reminder", "名称" to "名称", "通知时间" to "通知时间").copy(reminderRoute = route))
+
+/** 个人数量卡只保存用户指定的分类和字段位置。 */
+internal fun countTemplate(source: String, demand: String, route: com.life0423.carddock.core.rule.CountRoute) =
+    TemplateDefinition(id = "personal-count", title = route.subject + "数量", kind = TemplateKind.QUERY,
+        description = "核对" + (route.page?.plus("页中的") ?: "首页的") + route.subject + "数量", examplePrompt = demand,
+        rule = nativeRule("visible-count-v1", source, com.life0423.carddock.platform.COUNT_TARGET, "quantity" to "数量").copy(countRoute = route))

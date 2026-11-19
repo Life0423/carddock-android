@@ -123,6 +123,11 @@ internal fun CreatorScreen(
                         )
                     }
                 }
+                draft.demonstrations.forEachIndexed { index, candidate ->
+                    FilledTonalButton(onClick = { actions.demonstrateField(index) }, enabled = !busy) {
+                        Text("第${index + 1}项 · " + candidate.observed.values.joinToString())
+                    }
+                }
                 if (editingTemplate && draft.template == null) FilledTonalButton(
                     onClick = { focusManager.clearFocus(); actions.prepareTemplate() },
                     enabled = draft.prompt.isNotBlank() && !busy,

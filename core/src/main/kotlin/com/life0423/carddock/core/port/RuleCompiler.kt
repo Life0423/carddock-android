@@ -22,5 +22,6 @@ data class DiscoveredTemplate(val template: TemplateDefinition, val observed: Ma
 /** 返回 null 表示不支持此需求。读取失败返回原因，调用者保留可重试的草稿。 */
 sealed interface DiscoveryResult {
     data class Found(val candidate: DiscoveredTemplate) : DiscoveryResult
+    data class Demonstrate(val choices: List<DiscoveredTemplate>) : DiscoveryResult
     data class Incomplete(val reason: String) : DiscoveryResult
 }

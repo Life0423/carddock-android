@@ -72,24 +72,31 @@ class AppContainer(private val context: Context) {
         override suspend fun inspect(sourceId: String, targetKey: String): DeviceResponse =
             inspect(sourceId, targetKey, ReadOptions())
 
-        override suspend fun inspect(sourceId: String, targetKey: String, options: ReadOptions): DeviceResponse = when (sourceId) {
-            cainiaoEmptyTemplate.rule.sourceId -> withContext(Dispatchers.IO) { nativeDevice.cainiao(sourceId, targetKey) }
-            MEITUAN_PACKAGE -> if (targetKey == latestTakeoutTemplate.rule.targetKey) {
-                withContext(Dispatchers.IO) { nativeDevice.latestTakeout() }
-            } else if (targetKey == meituanTemplate.rule.targetKey && options.localTarget != null) {
-                // 页面树读取会同步查询系统服务，放到后台以便界面继续响应触摸。
-                withContext(Dispatchers.IO) {
-                    val oid = options.localTarget?.routeOid
-                    if (oid == null) meituan.inspect() else nativeDevice.meituan(oid)
-                }
-            } else DeviceResponse.Failed("此卡片缺少本机授权订单号码，请重新创建。")
-            JD_PACKAGE -> jd.inspect(targetKey, options.appPrice, options.requestedAt)
-            else -> if (targetKey == "visible-reminder" && options.reminderRoute != null) {
-                val permitted = context.packageManager.queryIntentActivities(android.content.Intent(android.content.Intent.ACTION_MAIN)
-                    .addCategory(android.content.Intent.CATEGORY_APP_CALENDAR), 0).any { it.activityInfo.packageName == sourceId }
-                if (!permitted) DeviceResponse.NeedsUser("请重新选择本机提醒来源。")
-                else withContext(Dispatchers.IO) { nativeDevice.reminderTrial(sourceId, options.reminderRoute) }
-            } else device.inspect(sourceId, targetKey)
+        override suspend fun inspect(sourceId: String, targetKey: String, options: ReadOptions): DeviceResponse {
+            if (targetKey == com.life0423.carddock.platform.COUNT_TARGET) {
+                val route = options.countRoute ?: return DeviceResponse.NeedsUser("缺少数量字段，请重新试运行。")
+                return if (context.packageManager.getLaunchIntentForPackage(sourceId) == null) DeviceResponse.NeedsUser("找不到模板指定的应用。")
+                else withContext(Dispatchers.IO) { nativeDevice.count(sourceId, route.page, route.subject, route) }
+            }
+            return when (sourceId) {
+                cainiaoEmptyTemplate.rule.sourceId -> withContext(Dispatchers.IO) { nativeDevice.cainiao(sourceId, targetKey) }
+                MEITUAN_PACKAGE -> if (targetKey == latestTakeoutTemplate.rule.targetKey) {
+                    withContext(Dispatchers.IO) { nativeDevice.latestTakeout() }
+                } else if (targetKey == meituanTemplate.rule.targetKey && options.localTarget != null) {
+                    // 页面树读取会同步查询系统服务，放到后台以便界面继续响应触摸。
+                    withContext(Dispatchers.IO) {
+                        val oid = options.localTarget?.routeOid
+                        if (oid == null) meituan.inspect() else nativeDevice.meituan(oid)
+                    }
+                } else DeviceResponse.Failed("此卡片缺少本机授权订单号码，请重新创建。")
+                JD_PACKAGE -> jd.inspect(targetKey, options.appPrice, options.requestedAt)
+                else -> if (targetKey == "visible-reminder" && options.reminderRoute != null) {
+                    val permitted = context.packageManager.queryIntentActivities(android.content.Intent(android.content.Intent.ACTION_MAIN)
+                        .addCategory(android.content.Intent.CATEGORY_APP_CALENDAR), 0).any { it.activityInfo.packageName == sourceId }
+                    if (!permitted) DeviceResponse.NeedsUser("请重新选择本机提醒来源。")
+                    else withContext(Dispatchers.IO) { nativeDevice.reminderTrial(sourceId, options.reminderRoute) }
+                } else device.inspect(sourceId, targetKey)
+            }
         }
     }
 
@@ -99,7 +106,8 @@ class AppContainer(private val context: Context) {
         templateStore = AtomicTemplateStore(context, json),
         compiler = MockRuleCompiler(templates),
         personalCompiler = PersonalRuleCompiler,
-        discover = { demand -> discoverReminder(context, modelSettings, nativeDevice, demand) },
+        discover = { demand -> discoverReminder(context, modelSettings, nativeDevice, demand)
+            ?: discoverCount(context, modelSettings, nativeDevice, demand) },
         engine = RuleEngine(routedDevice),
         templates = templates,
         scope = applicationScope,

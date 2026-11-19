@@ -22,6 +22,7 @@ internal data class DetailNode(
     val visible: Boolean,
     val bounds: android.graphics.Rect? = null,
     val scrollable: Boolean = false,
+    val selected: Boolean = false,
 )
 internal data class DetailWindow(val source: String?, val nodes: List<DetailNode>, val password: Boolean)
 internal data class OrderEvidence(val number: String, val status: String, val time: String)

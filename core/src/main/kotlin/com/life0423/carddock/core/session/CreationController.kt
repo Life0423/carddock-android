@@ -79,7 +79,7 @@ internal class CreationController(
         val current = draft.value ?: return
         if (current.phase.isBusy() || current.ruleChangeCard != null) return
         mutableDraft.value = current.copy(
-            template = template, prompt = template.examplePrompt,
+            template = template, prompt = template.examplePrompt, demonstrations = emptyList(),
             title = current.title.ifBlank { template.title },
             description = current.description.ifBlank { template.description },
             modelCandidate = false, orderNumber = "", routeOid = "",
@@ -131,7 +131,7 @@ internal class CreationController(
         val current = draft.value ?: return
         if (current.phase.isBusy() || current.ruleChangeCard != null) return
         mutableDraft.value = current.copy(
-            prompt = prompt.take(500),
+            prompt = prompt.take(500), demonstrations = emptyList(),
             title = current.title.takeUnless { it == current.template?.title }.orEmpty(),
             description = current.description.takeUnless { it == current.template?.description }.orEmpty(),
             orderNumber = "",
@@ -169,14 +169,15 @@ internal class CreationController(
     }
 
     /** 已有仍活跃的试运行或保存时直接返回。取消收尾中 isActive 为 false，这道检查让开。空白提示词不改阶段。 */
-    fun trial(generate: Boolean = false, prepare: Boolean = false) {
+    fun trial(generate: Boolean = false, prepare: Boolean = false, demonstration: Int? = null) {
         val current = draft.value ?: return
+        val shown = demonstration?.let { current.demonstrations.getOrNull(it) ?: return }
         if (work?.isActive == true || current.prompt.isBlank()) return
         if (generate && !current.modelCandidate && current.template?.rule?.targetKey != "cainiao.pickup.empty") return
         val token = generation
         if (current.modelCandidate && !generate && current.template == null) return
         mutableDraft.value = current.copy(
-            phase = RunPhase.QUEUED, preview = null,
+            demonstrations = emptyList(), phase = RunPhase.QUEUED, preview = null,
             template = if (generate) null else current.template,
             modelCandidate = current.modelCandidate || generate,
             message = if (generate) "正在生成菜鸟候选…" else "正在匹配模板…",
@@ -184,8 +185,9 @@ internal class CreationController(
         work = scope.launch {
             try {
                 // 编译放在通道锁外，匹配模板时不堵住正在刷新的卡片。
-                var observed: Map<String, String>? = null
+                var observed = shown?.observed
                 var compiled = when {
+                    shown != null -> CompileResult.Success(shown.template)
                     generate -> modelCompiler?.compile(current.prompt)
                         ?: CompileResult.Unsupported("请先在“我的”配置模型。")
                     current.template != null -> CompileResult.Success(current.template)
@@ -198,6 +200,11 @@ internal class CreationController(
                         is DiscoveryResult.Found -> {
                             observed = found.candidate.observed
                             compiled = CompileResult.Success(found.candidate.template)
+                        }
+                        is DiscoveryResult.Demonstrate -> {
+                            edit(token) { it.copy(phase = RunPhase.NEEDS_USER, demonstrations = found.choices,
+                                message = "页面中有多个数量。请按来源页面的显示顺序示范一次，点选要读取的字段。") }
+                            return@launch
                         }
                         is DiscoveryResult.Incomplete -> compiled = CompileResult.Unsupported(found.reason)
                         null -> Unit

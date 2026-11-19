@@ -28,6 +28,7 @@ data class CreationDraft(
     val saving: Boolean = false,
     val modelCandidate: Boolean = false,
     val ruleChangeCard: CardRecord? = null,
+    val demonstrations: List<com.life0423.carddock.core.port.DiscoveredTemplate> = emptyList(),
     val rollingBackRule: Boolean = false,
 )
 
@@ -76,6 +77,7 @@ data class PrototypeActions(
     val deleteTemplate: (String) -> Unit = {},
     val changeRouteOid: (String) -> Unit = {},
     val changeOrderNumber: (String) -> Unit = {},
+    val demonstrateField: (Int) -> Unit = {},
     val prepareTemplate: () -> Unit = {},
     val generateCandidate: () -> Unit = {},
     val verifyPrice: (String) -> Unit = {},

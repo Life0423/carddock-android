@@ -87,7 +87,7 @@ class CardDockAccessibilityService : AccessibilityService() {
                 val label = if (visible) (node.text ?: node.contentDescription)?.toString().orEmpty()
                     .replace(formatCharacters, "").trim() else ""
                 val bounds = if (geometry) android.graphics.Rect().also(node::getBoundsInScreen) else null
-                rows += DetailNode(parent, node.viewIdResourceName, node.className?.toString(), label, visible, bounds, node.isScrollable)
+                rows += DetailNode(parent, node.viewIdResourceName, node.className?.toString(), label, visible, bounds, node.isScrollable, node.isSelected)
                 for (child in 0 until node.childCount) node.getChild(child)?.let { visit(it, index) }
             } finally {
                 node.recycle()
@@ -115,7 +115,7 @@ class CardDockAccessibilityService : AccessibilityService() {
     }
 
     /** 在指定查询屏定位可见节点，优先点击控件，必要时向该屏分派手势。 */
-    internal fun tapReadTarget(displayId: Int, expected: String, target: DetailNode): Boolean {
+    internal fun tapReadTarget(displayId: Int, expected: String, target: DetailNode, actionBounds: android.graphics.Rect? = null): Boolean {
         if (displayId <= 0 || Build.VERSION.SDK_INT < 30) return false
         val box = target.bounds ?: return false
         val root = backgroundRoot(displayId, expected) ?: return false
@@ -127,7 +127,8 @@ class CardDockAccessibilityService : AccessibilityService() {
             repeat(5) {
                 val n = current ?: return@repeat
                 val bounds = android.graphics.Rect().also(n::getBoundsInScreen)
-                if (!target.label.startsWith("下单时间") && n.isClickable && bounds.width() <= box.width()*6 && bounds.height() <= box.height()*6) {
+                val allowed = actionBounds?.contains(bounds) ?: (bounds.width() <= box.width()*6 && bounds.height() <= box.height()*6)
+                    if (allowed && !target.label.startsWith("下单时间") && n.isClickable) {
                     val ok = n.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                     n.recycle(); current=null
                     if (ok) return true
