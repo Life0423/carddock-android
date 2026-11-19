@@ -15,6 +15,16 @@ data class FieldValue(
     val value: String,
 )
 
+/** 仅配置界面字段；底层快照保留完整核验数据供选购比较等功能使用。 */
+@Serializable
+data class DisplayField(val key: String, val label: String)
+
+/** 空配置沿用旧卡的完整展示。自定义配置按用户指定的字段顺序投影。 */
+fun CardSnapshot.displayFields(layout: List<DisplayField>): List<FieldValue> =
+    if (layout.isEmpty()) fields else layout.mapNotNull { item ->
+        fields.firstOrNull { it.key == item.key }?.copy(label = item.label)
+    }
+
 /**
  * Only verified results become snapshots; a failed refresh must retain the previous one.
  * 失败、取消、接管和中断都不换这份快照，只有引擎成功才由会话替换。sourceLabel 缺省即演示数据来源。
@@ -64,7 +74,7 @@ data class RunInfo(
 
 /** 授权订单号仅用于本机核对，不进入规则和卡片展示字段。 */
 @Serializable
-data class LocalTarget(val orderNumber: String) {
+data class LocalTarget(val orderNumber: String, val routeOid: String? = null) {
     override fun toString(): String = "LocalTarget(已隐藏)"
 }
 
@@ -92,6 +102,10 @@ data class CardRecord(
     val appPrice: AppPrice? = null,
     val priceVerificationFailed: Boolean = false,
     val previousRule: RuleSpec? = null,
+    val favorite: Boolean = false,
+    val sourceTemplateId: String? = null,
+    val sourceTemplateRevision: Int? = null,
+    val display: List<DisplayField> = emptyList(),
 )
 
 /** 一条可试运行的演示模板。examplePrompt 只负责预填，编译器仍按用户最终输入分流，不按模板 id。 */
@@ -104,4 +118,6 @@ data class TemplateDefinition(
     val examplePrompt: String,
     val rule: RuleSpec,
     val requiresOrderNumber: Boolean = false,
+    val revision: Int = 1,
+    val display: List<DisplayField> = emptyList(),
 )

@@ -1,9 +1,16 @@
+import java.net.URI
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
+
+val squareEndpoint = providers.gradleProperty("carddockSquareEndpoint").orNull
+require(squareEndpoint == null || URI(squareEndpoint).run {
+    scheme == "https" && host != null && userInfo == null && query == null && fragment == null
+}) { "carddockSquareEndpoint 必须是 HTTPS 服务地址" }
 
 android {
     namespace = "com.life0423.carddock"
@@ -15,12 +22,14 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0-prototype"
+        resValue("string", "square_endpoint", squareEndpoint ?: "")
     }
 
     buildTypes {
         debug {
             // Keep the demo installation separate from a future production app.
             applicationIdSuffix = ".prototype"
+            resValue("string", "square_endpoint", squareEndpoint ?: "http://127.0.0.1:8765")
         }
         release {
             isMinifyEnabled = false
@@ -34,6 +43,7 @@ android {
 
     buildFeatures {
         compose = true
+        aidl = true
     }
 
     testOptions {

@@ -7,6 +7,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.life0423.carddock.platform.CardDockAccessibilityService
+import com.life0423.carddock.platform.mika.DockMikaHandoff
 import com.life0423.carddock.ui.CardDockApp
 
 /**
@@ -31,15 +33,21 @@ class MainActivity : ComponentActivity() {
             val viewModel: CardDockViewModel = viewModel(factory = CardDockViewModel.factory(controller))
             val state = viewModel.state.collectAsStateWithLifecycle()
             val tools = container.tools.collectAsStateWithLifecycle()
+            val readerConnected = CardDockAccessibilityService.connected.collectAsStateWithLifecycle()
+            val assistant = DockMikaHandoff.display.collectAsStateWithLifecycle()
             CardDockApp(
                 state = state.value, actions = viewModel.actions, openAccessibilitySettings = {
                     startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
                 },
                 tools = tools.value,
-                openModelCreator = { controller.openModelCreator(cainiaoEmptyTemplate) },
+                squareStore = container.square,
                 saveModel = container::saveModel,
                 clearModel = container::clearModel,
                 saveShopping = container::saveShopping,
+                toggleShoppingFavorite = container::toggleShoppingFavorite,
+                saveMeituanRoute = container::saveMeituanRoute,
+                pageReaderConnected = readerConnected.value,
+                mikaConnected = assistant.value != null,
             )
         }
     }

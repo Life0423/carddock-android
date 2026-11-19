@@ -1,5 +1,7 @@
 package com.life0423.carddock.ui
 
+import com.life0423.carddock.core.model.displayFields
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -98,7 +100,7 @@ internal fun FunctionCard(
                 if (phase != RunPhase.SUCCEEDED && phase != RunPhase.IDLE) {
                     Text("暂显示上次有效结果", color = DockColors.Amber, style = MaterialTheme.typography.labelMedium)
                 }
-                SnapshotFields(snapshot.fields)
+                SnapshotFields(snapshot.displayFields(card.display))
             } ?: Text("还没有有效结果。点击刷新，执行并核验这张功能卡。", color = DockColors.Muted)
 
             card.run?.message?.takeIf { it.isNotBlank() && phase != RunPhase.SUCCEEDED }?.let { message ->

@@ -4,6 +4,8 @@ import com.life0423.carddock.core.engine.EngineResult
 import com.life0423.carddock.core.engine.RuleEngine
 import com.life0423.carddock.core.model.CardRecord
 import com.life0423.carddock.core.model.LocalTarget
+import com.life0423.carddock.core.model.PersonalTemplate
+import com.life0423.carddock.core.model.TemplateEdit
 import com.life0423.carddock.core.port.ReadOptions
 import com.life0423.carddock.core.model.RunInfo
 import com.life0423.carddock.core.model.RunPhase
@@ -27,6 +29,7 @@ import kotlinx.coroutines.sync.withLock
  */
 internal class CreationController(
     private val compiler: RuleCompiler,
+    private val personalCompiler: RuleCompiler,
     private val modelCompiler: RuleCompiler?,
     private val engine: RuleEngine,
     private val cards: CardCollection,
@@ -35,14 +38,16 @@ internal class CreationController(
     private val now: () -> Long,
     private val newId: () -> String,
     private val notify: (String) -> Unit,
+    private val library: TemplateLibrary,
 ) {
     private val mutableDraft = MutableStateFlow<CreationDraft?>(null)
     val draft = mutableDraft.asStateFlow()
     private var generation = 0L
     private var work: Job? = null
 
-    /** 先关掉上一轮并作废其代际。模板只预填提示词和标题，规则要等试运行编译成功才进草稿。 */
+    /** 作废上一轮预览。已选模板直接提供候选规则，描述需求则在试运行时匹配。 */
     fun open(template: TemplateDefinition?, model: Boolean = false) {
+        if (draft.value?.saving == true) return
         close()
         mutableDraft.value = CreationDraft(
             prompt = template?.examplePrompt.orEmpty(),
@@ -52,16 +57,67 @@ internal class CreationController(
         )
     }
 
+    /** 新编辑使用固定 ID。重开时只恢复定义，不恢复订单参数和试运行资格。 */
+    fun openTemplateEditor(id: String?) {
+        if (draft.value?.saving == true) return
+        val entry = id?.let { key -> library.state.value.firstOrNull { it.id == key } ?: return }
+        val edit = entry?.edit
+        val candidate = if (edit != null) edit.candidate else entry?.published
+        open(candidate)
+        mutableDraft.value = checkNotNull(draft.value).copy(
+            personalTemplateId = entry?.id ?: newId(),
+            prompt = edit?.prompt ?: candidate?.examplePrompt.orEmpty(),
+            title = edit?.title ?: candidate?.title.orEmpty(),
+            description = edit?.description ?: candidate?.description.orEmpty(),
+        )
+    }
+
+    /** 选中的模板直接提供规则，切换后清掉旧参数和预览。 */
+    fun chooseTemplate(template: TemplateDefinition) {
+        val current = draft.value ?: return
+        if (current.phase.isBusy() || current.ruleChangeCard != null) return
+        mutableDraft.value = current.copy(
+            template = template, prompt = template.examplePrompt,
+            title = current.title.ifBlank { template.title },
+            description = current.description.ifBlank { template.description },
+            modelCandidate = false, orderNumber = "", routeOid = "",
+            phase = RunPhase.IDLE, preview = null, message = "",
+        )
+    }
+
+    /** 变更展示只更新模板布局，试运行仍用完整的原始规则读取设备。 */
+    fun changeDisplayFields(fields: List<com.life0423.carddock.core.model.DisplayField>) {
+        val current = draft.value ?: return
+        val template = current.template ?: return
+        if (current.phase.isBusy() || current.personalTemplateId == null || fields == template.display) return
+        mutableDraft.value = current.copy(template = template.copy(display = fields),
+            phase = RunPhase.IDLE, preview = null, message = "")
+    }
+
+    fun changeDescription(value: String) {
+        val current = draft.value ?: return
+        if (!current.phase.isBusy()) mutableDraft.value = current.copy(description = value.take(160))
+    }
+
+    fun changeRouteOid(value: String) {
+        val current = draft.value ?: return
+        if (!current.phase.isBusy()) mutableDraft.value = current.copy(
+            routeOid = value.trim(), phase = RunPhase.IDLE, preview = null, message = "",
+        )
+    }
+
     /** 从已保存的菜鸟规则打开草稿，原卡在确认保存前继续使用旧规则。 */
     fun openRuleChange(card: CardRecord, template: TemplateDefinition, rollback: Boolean) {
+        if (draft.value?.saving == true) return
         open(template)
         mutableDraft.value = checkNotNull(draft.value).copy(
             title = card.title, ruleChangeCard = card, rollingBackRule = rollback,
         )
     }
 
-    /** 代际加一并取消任务，然后丢掉草稿。已经进集合提交段的保存仍可能写完，但不会再改当前草稿。 */
+    /** 取消试运行并作废其代际。持久化进行时保留编辑器，直到写入完成。 */
     fun close() {
+        if (draft.value?.saving == true) return
         generation += 1
         work?.cancel()
         work = null
@@ -74,8 +130,12 @@ internal class CreationController(
         if (current.phase.isBusy() || current.ruleChangeCard != null) return
         mutableDraft.value = current.copy(
             prompt = prompt.take(500),
+            title = current.title.takeUnless { it == current.template?.title }.orEmpty(),
+            description = current.description.takeUnless { it == current.template?.description }.orEmpty(),
             orderNumber = "",
+            routeOid = "",
             template = null,
+            modelCandidate = false,
             phase = RunPhase.IDLE,
             preview = null,
             message = "",
@@ -96,7 +156,7 @@ internal class CreationController(
             }
         }
         mutableDraft.value = current.copy(
-            orderNumber = number, phase = RunPhase.IDLE, preview = null, message = "",
+            orderNumber = number, routeOid = if (number == current.orderNumber) current.routeOid else "", phase = RunPhase.IDLE, preview = null, message = "",
         )
     }
 
@@ -107,14 +167,16 @@ internal class CreationController(
     }
 
     /** 已有仍活跃的试运行或保存时直接返回。取消收尾中 isActive 为 false，这道检查让开。空白提示词不改阶段。 */
-    fun trial(generate: Boolean = false) {
+    fun trial(generate: Boolean = false, prepare: Boolean = false) {
         val current = draft.value ?: return
-        if (work?.isActive == true || current.prompt.isBlank() || generate && !current.modelCandidate) return
+        if (work?.isActive == true || current.prompt.isBlank()) return
+        if (generate && !current.modelCandidate && current.template?.rule?.targetKey != "cainiao.pickup.empty") return
         val token = generation
         if (current.modelCandidate && !generate && current.template == null) return
         mutableDraft.value = current.copy(
             phase = RunPhase.QUEUED, preview = null,
             template = if (generate) null else current.template,
+            modelCandidate = current.modelCandidate || generate,
             message = if (generate) "正在生成菜鸟候选…" else "正在匹配模板…",
         )
         work = scope.launch {
@@ -123,7 +185,8 @@ internal class CreationController(
                 val compiled = when {
                     generate -> modelCompiler?.compile(current.prompt)
                         ?: CompileResult.Unsupported("请先在“我的”配置模型。")
-                    current.modelCandidate || current.ruleChangeCard != null -> CompileResult.Success(checkNotNull(current.template))
+                    current.template != null -> CompileResult.Success(current.template)
+                    current.personalTemplateId != null -> personalCompiler.compile(current.prompt.trim())
                     else -> compiler.compile(current.prompt.trim())
                 }
                 when (compiled) {
@@ -134,10 +197,11 @@ internal class CreationController(
                         edit(token) { it.copy(
                             template = compiled.template,
                             title = it.title.ifBlank { compiled.template.title },
+                            description = it.description.ifBlank { compiled.template.description },
                             message = "等待设备操作通道",
                         ) }
-                        if (generate) {
-                            edit(token) { it.copy(phase = RunPhase.IDLE, message = "候选已生成，请检查规则后试运行。") }
+                        if (generate || prepare) {
+                            edit(token) { it.copy(phase = RunPhase.IDLE, message = "候选已生成，请确认后试运行。") }
                             return@launch
                         }
                         val target = if (compiled.template.requiresOrderNumber) {
@@ -145,7 +209,11 @@ internal class CreationController(
                                 edit(token) { it.copy(phase = RunPhase.FAILED, message = "请复制美团「订单信息」中的「订单号码」（15–30 位数字）。") }
                                 return@launch
                             }
-                            LocalTarget(current.orderNumber)
+                            if (current.routeOid.isNotEmpty() && !current.routeOid.matches(Regex("[0-9]{19}"))) {
+                                edit(token) { it.copy(phase = RunPhase.FAILED, message = "后台路由号须为 19 位数字，或留空使用手动核验。") }
+                                return@launch
+                            }
+                            LocalTarget(current.orderNumber, current.routeOid.ifBlank { null })
                         } else null
                         lane.withLock {
                             // 排队等锁期间可能已被关闭。拿到锁后再检查，避免把取消写成一次读取。
@@ -184,20 +252,24 @@ internal class CreationController(
 
     /**
      * 只有试运行成功、预览和模板都在、标题非空白且没有进行中的任务才写卡片。
-     * 关闭会取消这个协程，但集合的提交段不可取消，所以晚到的成功仍可能入列。
+     * 写入期间锁住关闭操作，写入失败时恢复当前预览。
      */
     fun save() {
         val current = draft.value ?: return
+        if (current.personalTemplateId != null) {
+            saveTemplate(verified = true)
+            return
+        }
         val preview = current.preview ?: return
         val template = current.template ?: return
         if (current.phase != RunPhase.SUCCEEDED || current.title.isBlank() || work?.isActive == true) return
         val original = current.ruleChangeCard
         if (original == null && cards.state.value.cards.size >= MAX_CARDS) {
-            notify("原型最多保存 $MAX_CARDS 张卡片，请先移除不需要的卡片。")
+            mutableDraft.value = current.copy(message = "空间已满（$MAX_CARDS 张）。请先移除不需要的卡片。")
             return
         }
         val token = generation
-        mutableDraft.value = current.copy(phase = RunPhase.RUNNING, message = "正在保存卡片…")
+        mutableDraft.value = current.copy(phase = RunPhase.RUNNING, saving = true, message = "正在保存卡片…")
         work = scope.launch {
             val run = RunInfo(
                 id = newId(), phase = RunPhase.SUCCEEDED,
@@ -209,7 +281,8 @@ internal class CreationController(
                 ?: CardRecord(
                     id = newId(), title = current.title.trim(), kind = template.kind,
                     rule = template.rule, snapshot = preview, run = run,
-                    localTarget = current.orderNumber.takeIf { template.requiresOrderNumber }?.let(::LocalTarget),
+                    localTarget = if (template.requiresOrderNumber) LocalTarget(current.orderNumber, current.routeOid.ifBlank { null }) else null,
+                    sourceTemplateId = template.id, sourceTemplateRevision = template.revision, display = template.display,
                 )
             if (cards.update { existing ->
                     if (original == null) existing + card
@@ -231,6 +304,40 @@ internal class CreationController(
                     "卡片已变化，请关闭后重新试运行。"
                 } else "保存失败，预览仍保留，可以重试。"
                 edit(token) { current.copy(message = message) }
+            }
+        }
+    }
+
+    /** 草稿和可用版只写定义。订单、路由和预览不进入模板库。 */
+    fun saveTemplate(verified: Boolean) {
+        val current = draft.value ?: return
+        val id = current.personalTemplateId ?: return
+        if (current.phase.isBusy() || work?.isActive == true) return
+        if (current.title.isBlank() && (verified || current.prompt.isBlank())) return
+        val candidate = current.template
+        if (verified && (current.phase != RunPhase.SUCCEEDED || current.preview == null || candidate == null)) return
+        val token = generation
+        val title = current.title.trim()
+        val description = current.description.trim()
+        mutableDraft.value = current.copy(phase = RunPhase.RUNNING, saving = true, message = "正在保存模板…")
+        work = scope.launch {
+            val saved = library.update { list ->
+                val previous = list.firstOrNull { it.id == id } ?: PersonalTemplate(id)
+                val next = if (verified) previous.copy(
+                    published = checkNotNull(candidate).copy(id = id, title = title, description = description,
+                        revision = (previous.published?.revision ?: 0) + 1),
+                    edit = null,
+                ) else previous.copy(edit = TemplateEdit(title, description, candidate, current.prompt))
+                if (previous in list) list.map { if (it.id == id) next else it } else list + next
+            }
+            if (saved) {
+                if (generation == token) {
+                    generation += 1
+                    mutableDraft.value = null
+                }
+                notify(if (verified) "模板已保存" else "模板草稿已保存")
+            } else {
+                edit(token) { current.copy(message = "保存失败，编辑内容仍保留，可以重试。") }
             }
         }
     }

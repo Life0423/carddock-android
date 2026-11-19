@@ -1,6 +1,7 @@
 package com.life0423.carddock.core.session
 
 import com.life0423.carddock.core.model.CardRecord
+import com.life0423.carddock.core.model.PersonalTemplate
 import com.life0423.carddock.core.model.CardSnapshot
 import com.life0423.carddock.core.model.RunPhase
 import com.life0423.carddock.core.model.TemplateDefinition
@@ -21,6 +22,10 @@ data class CreationDraft(
     val preview: CardSnapshot? = null,
     val message: String = "",
     val orderNumber: String = "",
+    val routeOid: String = "",
+    val personalTemplateId: String? = null,
+    val description: String = "",
+    val saving: Boolean = false,
     val modelCandidate: Boolean = false,
     val ruleChangeCard: CardRecord? = null,
     val rollingBackRule: Boolean = false,
@@ -38,6 +43,7 @@ data class PrototypeState(
     val scenario: DemoScenario = DemoScenario.NORMAL,
     val notice: String? = null,
     val sequence: SequenceStatus? = null,
+    val personalTemplates: List<PersonalTemplate> = emptyList(),
 )
 
 /** 顺序核验停在需要用户切页的项目之前，明确展示当前进度。 */
@@ -62,12 +68,21 @@ data class PrototypeActions(
     val changeScenario: (DemoScenario) -> Unit,
     val resetDemo: () -> Unit,
     val dismissNotice: () -> Unit,
+    val openTemplateEditor: (String?) -> Unit = {},
+    val chooseDraftTemplate: (TemplateDefinition) -> Unit = {},
+    val changeDisplayFields: (List<com.life0423.carddock.core.model.DisplayField>) -> Unit = {},
+    val changeTemplateDescription: (String) -> Unit = {},
+    val keepTemplateDraft: () -> Unit = {},
+    val deleteTemplate: (String) -> Unit = {},
+    val changeRouteOid: (String) -> Unit = {},
     val changeOrderNumber: (String) -> Unit = {},
+    val prepareTemplate: () -> Unit = {},
     val generateCandidate: () -> Unit = {},
     val verifyPrice: (String) -> Unit = {},
     val refreshSequence: (List<String>) -> Unit = {},
     val advanceSequence: () -> Unit = {},
     val cancelSequence: () -> Unit = {},
+    val toggleFavorite: (String) -> Unit = {},
     val changeCardRule: (String, Boolean) -> Unit = { _, _ -> },
 
 )

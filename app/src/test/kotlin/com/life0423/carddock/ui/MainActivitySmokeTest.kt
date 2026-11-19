@@ -3,7 +3,6 @@ package com.life0423.carddock.ui
 import android.os.Looper
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
-import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -59,7 +58,8 @@ class MainActivitySmokeTest {
         }
         val card = controller.state.value.cards.first { it.id == id }
         assertNotNull(card.snapshot)
-        compose.onNodeWithTag("space_list").performScrollToNode(hasText("A3-6281"))
+        compose.onNodeWithTag("space_menu_$id").performClick()
+        compose.onNodeWithTag("open_card_$id").performClick()
         compose.onNodeWithText("A3-6281").assertIsDisplayed()
         compose.captureScreen("05-real-app-verified")
     }

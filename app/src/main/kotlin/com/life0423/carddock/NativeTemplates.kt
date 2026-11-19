@@ -13,7 +13,7 @@ import com.life0423.carddock.platform.MEITUAN_TARGET
 /** 首个真机模板仅证明明确空状态，不把未发现取件码当作没有包裹。 */
 val cainiaoEmptyTemplate = TemplateDefinition(
     id = "cainiao-empty", title = "菜鸟待取 · 真机", kind = TemplateKind.EXPRESS,
-    description = "核验菜鸟取包裹页的明确空状态。先在我的中启用页面读取，试运行后 20 秒内手动切到目标页，再返回确认保存。",
+    description = "核验菜鸟取包裹页的明确空状态。启用页面读取并连接 Mika 助手后，试运行会在后台打开并核验取包裹页。",
     examplePrompt = "核验菜鸟暂无待取包裹",
     rule = RuleSpec(
         id = "cainiao-empty-v1", sourceId = "com.cainiao.wireless", targetKey = "cainiao.pickup.empty",
@@ -42,11 +42,29 @@ internal fun cainiaoRuleChange(card: CardRecord, savedCards: List<CardRecord>, r
 /** 固定模板只定义公开字段；订单号码在试运行时单独输入。 */
 internal val meituanTemplate = TemplateDefinition(
     id = "meituan-history", title = "美团历史订单", kind = TemplateKind.DELIVERY,
-    description = "先在美团展开已完成订单的订单信息并复制号码。填写后开始试运行，从最近任务切回美团。",
+    description = "选择本机已核验的历史订单，查看订单状态和下单时间。",
     examplePrompt = "核验美团历史订单",
     rule = nativeRule("meituan-history-v1", MEITUAN_PACKAGE, MEITUAN_TARGET,
         "status" to "订单状态", "orderTime" to "下单时间"),
     requiresOrderNumber = true,
+)
+
+/** 最近外卖按列表下单时间选取，试运行与刷新均无需录入本机历史订单参数。 */
+internal val latestTakeoutTemplate = TemplateDefinition(
+    id = "meituan-latest", title = "美团最近外卖", kind = TemplateKind.DELIVERY,
+    description = "核验近一个月的外卖。当前支持完整一屏的已完成订单列表。",
+    examplePrompt = "查看美团最近一笔外卖",
+    rule = nativeRule("meituan-latest-v1", MEITUAN_PACKAGE, com.life0423.carddock.platform.MEITUAN_LATEST,
+        "status" to "订单状态", "orderTime" to "下单时间"),
+)
+
+/** 展示字段可少于页面核验所需信息，订单身份仍由执行器独立检查。 */
+internal val meituanStatusTemplate = meituanTemplate.copy(
+    id = "meituan-status",
+    title = "美团订单状态",
+    description = "核验授权订单后，仅显示订单状态。",
+    examplePrompt = "只显示美团订单状态",
+    rule = nativeRule("meituan-status-v1", MEITUAN_PACKAGE, MEITUAN_TARGET, "status" to "订单状态"),
 )
 
 internal val jdTemplates = JdProduct.entries.map { product ->

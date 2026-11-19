@@ -10,6 +10,11 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.CardDock">
+        <provider
+            android:name=".platform.mika.DockMikaHandoff"
+            android:authorities="${applicationId}.mika"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
         <service
             android:name=".platform.CardDockAccessibilityService"
             android:label="@string/accessibility_label"

@@ -26,6 +26,8 @@ internal fun classifyCainiaoPage(page: CainiaoObservation): CainiaoPage {
 class CainiaoDeviceGateway internal constructor(
     private val connected: () -> Boolean,
     private val observe: () -> CainiaoObservation?,
+    private val disconnected: String = "请在“我的”中开启卡坞无障碍读取，再重试。",
+    private val missing: String = "未核验到空状态。请重新读取，并在 20 秒内切到菜鸟“取包裹”页；有包裹时暂不支持提取。",
 ) : DeviceGateway {
     constructor() : this(
         { CardDockAccessibilityService.instance != null },
@@ -39,7 +41,7 @@ class CainiaoDeviceGateway internal constructor(
         return withTimeoutOrNull(20_000) {
             var result: DeviceResponse? = null
             while (result == null) {
-                if (!connected()) return@withTimeoutOrNull DeviceResponse.NeedsUser("请在“我的”中开启卡坞无障碍读取，再重试。")
+                if (!connected()) return@withTimeoutOrNull DeviceResponse.NeedsUser(disconnected)
                 when (observe()?.let(::classifyCainiaoPage)) {
                     CainiaoPage.AUTH -> result = DeviceResponse.NeedsUser("请先在菜鸟完成登录，再重新读取。")
                     CainiaoPage.EMPTY -> result = DeviceResponse.Ready(DeviceSnapshot(
@@ -52,6 +54,6 @@ class CainiaoDeviceGateway internal constructor(
                 }
             }
             result
-        } ?: DeviceResponse.NeedsUser("未核验到空状态。请重新读取，并在 20 秒内切到菜鸟“取包裹”页；有包裹时暂不支持提取。")
+        } ?: DeviceResponse.NeedsUser(missing)
     }
 }

@@ -5,13 +5,20 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ShoppingCart
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -33,7 +40,7 @@ internal fun TemplateKind.icon(): ImageVector = when (this) {
     TemplateKind.EXPRESS -> DockIcons.Inventory2
     TemplateKind.DELIVERY -> DockIcons.LocalShipping
     TemplateKind.TRAVEL -> DockIcons.Train
-    TemplateKind.SHOPPING -> DockIcons.Inventory2
+    TemplateKind.SHOPPING -> Icons.Rounded.ShoppingCart
 }
 
 internal fun TemplateKind.accent(): Color = when (this) {
@@ -41,6 +48,13 @@ internal fun TemplateKind.accent(): Color = when (this) {
     TemplateKind.DELIVERY -> DockColors.Mint
     TemplateKind.TRAVEL -> DockColors.Blue
     TemplateKind.SHOPPING -> DockColors.Mint
+}
+
+/** 页面主操作共用薄荷绿填充和最小高度，字体放大时仍可自然增高。 */
+@Composable
+internal fun DockPrimaryAction(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
+    Button(onClick, modifier = modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = enabled,
+        shape = RoundedCornerShape(14.dp)) { Text(label) }
 }
 
 @Composable
@@ -54,7 +68,7 @@ internal fun KindIcon(kind: TemplateKind, modifier: Modifier = Modifier) {
             imageVector = kind.icon(),
             contentDescription = null,
             tint = kind.accent(),
-            modifier = Modifier.padding(10.dp),
+            modifier = Modifier.padding(9.dp),
         )
     }
 }
@@ -123,3 +137,28 @@ internal fun SnapshotFields(fields: List<FieldValue>, modifier: Modifier = Modif
 /** 用设备默认时区和简体中文格式显示。同一毫秒在不同时区会显示成不同的钟点。 */
 internal fun formatTimestamp(epochMillis: Long): String =
     SimpleDateFormat("MM月dd日 HH:mm:ss", Locale.SIMPLIFIED_CHINESE).format(Date(epochMillis))
+
+/** 两个并列视图的选择，选中状态也提供给无障碍服务。 */
+@Composable
+internal fun DockSwitch(
+    first: String, second: String, secondSelected: Boolean, onSelect: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SingleChoiceSegmentedButtonRow(modifier) {
+        listOf(first, second).forEachIndexed { index, label ->
+            SegmentedButton(
+                selected = secondSelected == (index == 1),
+                onClick = { onSelect(index == 1) },
+                shape = SegmentedButtonDefaults.itemShape(index, 2),
+                colors = SegmentedButtonDefaults.colors(
+                    activeContainerColor = DockColors.Mint,
+                    activeContentColor = MaterialTheme.colorScheme.onPrimary,
+                    inactiveContainerColor = DockColors.Surface,
+                    inactiveContentColor = DockColors.Text,
+                    inactiveBorderColor = DockColors.Outline,
+                ),
+                icon = {},
+            ) { Text(label) }
+        }
+    }
+}

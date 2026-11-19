@@ -1,6 +1,8 @@
 package com.life0423.carddock
 
+import com.life0423.carddock.ai.PersonalRuleCompiler
 import com.life0423.carddock.ai.compileCainiaoCandidate
+import com.life0423.carddock.core.rule.RuleStep
 import com.life0423.carddock.core.engine.EngineResult
 import com.life0423.carddock.core.engine.RuleEngine
 import com.life0423.carddock.core.model.AppPrice
@@ -16,6 +18,7 @@ import com.life0423.carddock.data.ShoppingStore
 import com.life0423.carddock.data.ShoppingTask
 import com.life0423.carddock.data.priceChange
 import com.life0423.carddock.platform.DetailNode
+import com.life0423.carddock.platform.latestTakeoutRow
 import com.life0423.carddock.platform.DetailWindow
 import com.life0423.carddock.platform.JD_PACKAGE
 import com.life0423.carddock.platform.JdGateway
@@ -39,6 +42,55 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class)
 class NativeSourcesTest {
+    @Test fun personalDemandBuildsAStatusOnlyRule() = runTest {
+        val candidate = PersonalRuleCompiler.compile("只显示美团订单状态") as CompileResult.Success
+        assertTrue(candidate.template.requiresOrderNumber)
+        assertEquals(listOf("status"), candidate.template.rule.steps.filterIsInstance<RuleStep.ReadField>().map { it.outputKey })
+        assertTrue(PersonalRuleCompiler.compile("替我取消美团订单") is CompileResult.Unsupported)
+        assertTrue(PersonalRuleCompiler.compile("读取所有真实取件码") is CompileResult.Unsupported)
+    }
+
+    @Test fun naturalDemandKeepsProductIdentityAndProjectsOrderedFields() = runTest {
+        val result = PersonalRuleCompiler.compile("请帮我看看京东商品 A，只显示商品名称和规格") as CompileResult.Success
+        assertEquals(listOf("title", "variant"), result.template.display.map { it.key })
+        assertEquals(listOf("sku", "variant", "title"), result.template.rule.steps.filterIsInstance<RuleStep.ReadField>().map { it.outputKey })
+        assertTrue(PersonalRuleCompiler.compile("帮我看看菜鸟有没有待取包裹") is CompileResult.Success)
+        assertTrue(PersonalRuleCompiler.compile("帮我看看京东商品 A 的规格和帮我下单") is CompileResult.Unsupported)
+        val latest = PersonalRuleCompiler.compile("查看美团最近一笔外卖") as CompileResult.Success
+        assertEquals("meituan-latest", latest.template.id)
+        assertFalse(latest.template.requiresOrderNumber)
+    }
+
+    /** 两行状态与日期分别位于兄弟节点。模拟同分钟并列、第二行缺证及列表被裁切。 */
+    @Test fun latestTakeoutRequiresACompleteUnambiguousOrderInEachRow() {
+        fun node(parent: Int, label: String, box: android.graphics.Rect, role: String = "") =
+            DetailNode(parent, null, role, label, true, box)
+        val first = "下单时间：2026-11-18 12:00"
+        val newest = "下单时间：2026-11-18 12:01"
+        val nodes = listOf(
+            node(-1,"",android.graphics.Rect(0,0,300,20)),
+            node(0,"搜索我的订单",android.graphics.Rect(20,1,100,18)),
+            node(-1,"",android.graphics.Rect(0,20,300,500),"android.widget.ScrollView"),
+            node(2,"",android.graphics.Rect(0,20,300,220)),
+            node(3,"",android.graphics.Rect(0,20,300,120)),
+            node(4,"已完成",android.graphics.Rect(20,21,100,34)),
+            node(3,first,android.graphics.Rect(20,45,180,80)),
+            node(3,"",android.graphics.Rect(0,120,300,220)),
+            node(7,"已完成",android.graphics.Rect(20,121,100,140)),
+            node(3,newest,android.graphics.Rect(20,145,180,180)),
+        )
+        val page = DetailWindow(MEITUAN_PACKAGE, nodes, false)
+        assertEquals(newest, page.latestTakeoutRow()?.label)
+        fun changed(index: Int, replacement: DetailNode) = page.copy(nodes = nodes.toMutableList().apply { set(index,replacement) })
+        assertNull(changed(9,nodes[9].copy(label=first)).latestTakeoutRow())
+        assertNull(changed(8,nodes[8].copy(bounds=nodes[5].bounds)).latestTakeoutRow())
+        val shifted = nodes.map { n -> if (n.parent == 3 && n.bounds == nodes[4].bounds) n.copy(bounds=android.graphics.Rect(0,21,300,120)) else n }
+        val leading = node(3,"配送中",android.graphics.Rect(3,20,100,21))
+        assertNull(page.copy(nodes=shifted + leading).latestTakeoutRow())
+        assertNull(changed(2,nodes[2].copy(scrollable=true)).latestTakeoutRow())
+        assertNull(changed(2,nodes[2].copy(bounds=android.graphics.Rect(0,20,300,219))).latestTakeoutRow())
+    }
+
     @Test fun meituanUsesActualNumberAndRequiresTime() = runTest {
         val sample = "0001234567890123456"
         fun row(parent: Int, label: String = "", id: String? = null) = DetailNode(parent, id, null, label, true)
@@ -57,6 +109,13 @@ class NativeSourcesTest {
                 row(4), row(6, "订单号码"), row(6, sample),
                 row(4), row(9, "下单时间"), row(9, "2026-01-02 12:34:56"),
             )
+            // 折叠行的第一次点击被宿主吞掉，即使返回成功，也仅用出现的字段作为通过依据。
+            var clicks = 0
+            val retry = MeituanGateway(connected = { true }, observe = {
+                window.copy(nodes = if (clicks < 2) nodes.take(6) + row(4, "配送骑手/支付方式等") else nodes)
+            }, expand = { clicks++; true })
+            assertTrue(retry.inspect() is DeviceResponse.Ready)
+            assertEquals(2, clicks)
             window = window.copy(nodes = nodes)
             val good = engine.execute(rule, ReadOptions(LocalTarget(sample))) as EngineResult.Success
             assertEquals(listOf("订单已完成", "2026-01-02 12:34:56"), good.snapshot.fields.map { it.value })
@@ -66,6 +125,18 @@ class NativeSourcesTest {
             assertTrue(engine.execute(rule, ReadOptions(LocalTarget(sample))) is EngineResult.NeedsUser)
             window = window.copy(nodes = nodes.mapIndexed { index, node -> if (index == 9) node.copy(parent = 3) else node })
             assertTrue(engine.execute(rule, ReadOptions(LocalTarget(sample))) is EngineResult.NeedsUser)
+            if (list != null) {
+                // vivo 后台屏上，完成状态位于同一订单列表的独立状态子树。
+                val background = nodes.mapIndexed { index, node -> if (index == 2) node.copy(label = "") else node } +
+                    listOf(row(3, id = "$MEITUAN_PACKAGE:id/o73"),
+                        row(12, id = "$MEITUAN_PACKAGE:id/gme"), row(13, "订单已完成"))
+                window = window.copy(nodes = background)
+                assertTrue(engine.execute(rule, ReadOptions(LocalTarget(sample))) is EngineResult.Success)
+                window = window.copy(nodes = background.mapIndexed { index, node ->
+                    if (index == 12) node.copy(parent = 0) else node
+                })
+                assertTrue(engine.execute(rule, ReadOptions(LocalTarget(sample))) is EngineResult.NeedsUser)
+            }
         }
     }
 

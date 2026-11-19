@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -20,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -44,7 +46,6 @@ internal fun ModelSettingsForm(tools: PrototypeTools, save: (String, String, Str
     var model by remember(tools.model) { mutableStateOf(tools.model?.model.orEmpty()) }
     var key by remember { mutableStateOf("") }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("模型设置", style = MaterialTheme.typography.titleMedium)
         if (tools.model != null) Text("已配置 · " + tools.model.model)
         OutlinedTextField(endpoint, { endpoint = it }, Modifier.fillMaxWidth(), label = { Text("HTTPS 基础地址（含 /v1 等路径）") },
             singleLine = true, enabled = !tools.modelBusy, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
@@ -68,10 +69,10 @@ internal fun ModelSettingsForm(tools: PrototypeTools, save: (String, String, Str
 @Composable
 internal fun ShoppingScreen(
     cards: List<CardRecord>, sequence: SequenceStatus?, tools: PrototypeTools,
-    actions: PrototypeActions, save: (String) -> Unit,
+    actions: PrototypeActions, save: (String) -> Unit, onOpenCard: (String) -> Unit,
 ) {
     val saved = tools.shopping
-    var note by remember(saved) { mutableStateOf(saved?.note.orEmpty()) }
+    var note by rememberSaveable(saved) { mutableStateOf(saved?.note.orEmpty()) }
     val a = currentShoppingItem(cards, JdProduct.A)
     val b = currentShoppingItem(cards, JdProduct.B)
     val cardA = shoppingCard(cards, JdProduct.A)
@@ -80,7 +81,7 @@ internal fun ShoppingScreen(
         contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        item { Text("京东选购", style = MaterialTheme.typography.headlineMedium) }
+        item { Text("京东商品对比", style = MaterialTheme.typography.titleLarge) }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
@@ -90,8 +91,8 @@ internal fun ShoppingScreen(
                     color = DockColors.Muted,
                 )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ShoppingColumn("商品 A", a, saved?.a, Modifier.weight(1f))
-                    ShoppingColumn("商品 B", b, saved?.b, Modifier.weight(1f))
+                    ShoppingColumn("商品 A", a, saved?.a, Modifier.weight(1f), cardA?.let { { onOpenCard(it.id) } })
+                    ShoppingColumn("商品 B", b, saved?.b, Modifier.weight(1f), cardB?.let { { onOpenCard(it.id) } })
                 }
             }
         }
@@ -114,12 +115,13 @@ internal fun ShoppingScreen(
 }
 
 @Composable
-private fun ShoppingColumn(label: String, current: ShoppingItem?, saved: ShoppingItem?, modifier: Modifier) {
+private fun ShoppingColumn(label: String, current: ShoppingItem?, saved: ShoppingItem?, modifier: Modifier, onOpenCard: (() -> Unit)?) {
     Surface(modifier, color = DockColors.Surface, shape = RoundedCornerShape(16.dp)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Text(label, style = MaterialTheme.typography.titleMedium)
             if (current == null) Text("当前身份无法核验")
             current?.let { ShoppingFields(it) }
+            if (onOpenCard != null) OutlinedButton(onClick = onOpenCard) { Text("查看" + label) }
             saved?.let {
                 Text("已存快照", style = MaterialTheme.typography.titleSmall)
                 ShoppingFields(it)

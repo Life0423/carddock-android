@@ -2,6 +2,8 @@ package com.life0423.carddock
 
 import android.content.Context
 import com.life0423.carddock.ai.MockRuleCompiler
+import com.life0423.carddock.ai.PersonalRuleCompiler
+import com.life0423.carddock.data.SquareStore
 import com.life0423.carddock.ai.CainiaoModelCompiler
 import com.life0423.carddock.ai.ModelSettings
 import com.life0423.carddock.ai.ModelSummary
@@ -22,9 +24,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import com.life0423.carddock.core.engine.RuleEngine
 import com.life0423.carddock.core.session.PrototypeController
 import com.life0423.carddock.data.AtomicFileCardStore
+import com.life0423.carddock.data.AtomicTemplateStore
 import com.life0423.carddock.demo.DemoDeviceGateway
 import com.life0423.carddock.demo.TemplateCatalog
-import com.life0423.carddock.platform.CainiaoDeviceGateway
+import com.life0423.carddock.platform.mika.MikaBackgroundQuery
 import com.life0423.carddock.core.port.DeviceGateway
 import com.life0423.carddock.core.port.DeviceResponse
 import kotlinx.coroutines.CoroutineScope
@@ -40,25 +43,29 @@ import kotlinx.serialization.json.Json
  * scope 用 Main.immediate，这是控制器要求的串行调度器。immediate 让已经在主线程上的点击不必再投递一圈。
  * SupervisorJob 让初始化失败不会取消其余子任务。
  */
-class AppContainer(context: Context) {
+class AppContainer(private val context: Context) {
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    internal val square = SquareStore(context, context.getString(R.string.square_endpoint), applicationScope)
     // 演示文件给人读，所以排版。未知字段显式拒绝，避免以后多出来的键被静默丢掉。
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = false }
     private val device = DemoDeviceGateway()
-    private val nativeDevice = CainiaoDeviceGateway()
+    private val nativeDevice = MikaBackgroundQuery(context) { dockWindowFocused }
     private val meituan = MeituanGateway()
-    internal var dockWindowFocused = false
+    @Volatile internal var dockWindowFocused = false
     private val jd = JdGateway(context) { dockWindowFocused }
-    private val templates = TemplateCatalog.templates + listOf(cainiaoEmptyTemplate, meituanTemplate) + jdTemplates
+    private val templates = TemplateCatalog.templates + listOf(cainiaoEmptyTemplate, meituanTemplate, latestTakeoutTemplate) + jdTemplates
     private val modelSettings = ModelSettings(context)
     private val shoppingStore = ShoppingStore(context)
-    private val mutableTools = MutableStateFlow(PrototypeTools())
+    private val mutableTools = MutableStateFlow(PrototypeTools(shoppingFavorite =
+        context.getSharedPreferences("space", Context.MODE_PRIVATE).getBoolean("shopping_favorite", false)))
     internal val tools = mutableTools.asStateFlow()
     private val routedDevice = object : DeviceGateway {
         override fun instruction(sourceId: String, options: ReadOptions): String = when {
             options.appPrice -> "60 秒内切到京东匹配详情。打开分享，停一秒再复制链接，等详情恢复后返回卡坞。"
-            sourceId == MEITUAN_PACKAGE -> "请在 25 秒内从最近任务切回美团，打开对应已完成订单并展开“订单信息”。"
-            sourceId == cainiaoEmptyTemplate.rule.sourceId -> "请在 20 秒内切到菜鸟“取包裹”页。"
+            sourceId == MEITUAN_PACKAGE && options.localTarget == null -> "正在后台核验最近外卖…"
+            sourceId == MEITUAN_PACKAGE -> if (options.localTarget?.routeOid != null) "正在后台核验美团订单…"
+                else "请在 25 秒内打开美团已完成订单并展开“订单信息”。已保存的卡可在详情配置后台路由。"
+            sourceId == cainiaoEmptyTemplate.rule.sourceId -> "正在后台查询菜鸟待取状态…"
             else -> "正在读取页面"
         }
 
@@ -66,10 +73,15 @@ class AppContainer(context: Context) {
             inspect(sourceId, targetKey, ReadOptions())
 
         override suspend fun inspect(sourceId: String, targetKey: String, options: ReadOptions): DeviceResponse = when (sourceId) {
-            cainiaoEmptyTemplate.rule.sourceId -> withContext(Dispatchers.IO) { nativeDevice.inspect(sourceId, targetKey) }
-            MEITUAN_PACKAGE -> if (targetKey == meituanTemplate.rule.targetKey && options.localTarget != null) {
+            cainiaoEmptyTemplate.rule.sourceId -> withContext(Dispatchers.IO) { nativeDevice.cainiao(sourceId, targetKey) }
+            MEITUAN_PACKAGE -> if (targetKey == latestTakeoutTemplate.rule.targetKey) {
+                withContext(Dispatchers.IO) { nativeDevice.latestTakeout() }
+            } else if (targetKey == meituanTemplate.rule.targetKey && options.localTarget != null) {
                 // 页面树读取会同步查询系统服务，放到后台以便界面继续响应触摸。
-                withContext(Dispatchers.IO) { meituan.inspect() }
+                withContext(Dispatchers.IO) {
+                    val oid = options.localTarget?.routeOid
+                    if (oid == null) meituan.inspect() else nativeDevice.meituan(oid)
+                }
             } else DeviceResponse.Failed("此卡片缺少本机授权订单号码，请重新创建。")
             JD_PACKAGE -> jd.inspect(targetKey, options.appPrice, options.requestedAt)
             else -> device.inspect(sourceId, targetKey)
@@ -79,13 +91,15 @@ class AppContainer(context: Context) {
     val controller = PrototypeController(
         // applicationContext：文件跟进程走，不跟某个 Activity。
         store = AtomicFileCardStore(context.applicationContext, json),
+        templateStore = AtomicTemplateStore(context, json),
         compiler = MockRuleCompiler(templates),
+        personalCompiler = PersonalRuleCompiler,
         engine = RuleEngine(routedDevice),
         templates = templates,
         scope = applicationScope,
         setDeviceScenario = device::setScenario,
         modelCompiler = CainiaoModelCompiler(modelSettings),
-        needsManualSequenceStart = { it.rule.sourceId in setOf(cainiaoEmptyTemplate.rule.sourceId, MEITUAN_PACKAGE) },
+        needsManualSequenceStart = { it.rule.sourceId == MEITUAN_PACKAGE && it.localTarget?.routeOid == null },
         replacementTemplate = ::cainiaoRuleChange,
     )
 
@@ -145,6 +159,23 @@ class AppContainer(context: Context) {
         }
     }
 
+    /** 收藏只影响入口顺序，和选购快照分别保存。 */
+    internal fun toggleShoppingFavorite() {
+        val favorite = !mutableTools.value.shoppingFavorite
+        context.getSharedPreferences("space", Context.MODE_PRIVATE).edit()
+            .putBoolean("shopping_favorite", favorite).apply()
+        mutableTools.value = mutableTools.value.copy(shoppingFavorite = favorite)
+    }
+
+    /** 路由号与本机卡片一起保存，不进入模板或快照。 */
+    internal fun saveMeituanRoute(cardId: String, oid: String?): Boolean {
+        if (oid != null && !oid.matches(Regex("[0-9]{19}"))) return false
+        val card = controller.state.value.cards.firstOrNull { it.id == cardId }
+        if (card?.rule?.sourceId != MEITUAN_PACKAGE || card.localTarget == null) return false
+        controller.updateLocalRoute(cardId, oid)
+        return true
+    }
+
     internal fun saveShopping(note: String) {
         if (mutableTools.value.shoppingBusy) return
         val cards = controller.state.value.cards
@@ -175,6 +206,7 @@ internal data class PrototypeTools(
     val shopping: ShoppingTask? = null,
     val shoppingBusy: Boolean = true,
     val shoppingMessage: String? = null,
+    val shoppingFavorite: Boolean = false,
 )
 
 internal fun shoppingCard(cards: List<CardRecord>, product: JdProduct): CardRecord? = cards

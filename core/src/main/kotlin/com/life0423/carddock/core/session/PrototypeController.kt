@@ -5,6 +5,7 @@ import com.life0423.carddock.core.model.CardRecord
 import com.life0423.carddock.core.model.RunPhase
 import com.life0423.carddock.core.model.TemplateDefinition
 import com.life0423.carddock.core.port.CardStore
+import com.life0423.carddock.core.port.TemplateStore
 import com.life0423.carddock.core.port.RuleCompiler
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
@@ -38,6 +39,8 @@ class PrototypeController(
     modelCompiler: RuleCompiler? = null,
     private val needsManualSequenceStart: (CardRecord) -> Boolean = { false },
     private val replacementTemplate: ((CardRecord, List<CardRecord>, Boolean) -> TemplateDefinition?)? = null,
+    templateStore: TemplateStore? = null,
+    personalCompiler: RuleCompiler = compiler,
 ) {
     private val notice = MutableStateFlow<String?>(null)
     private val scenario = MutableStateFlow(DemoScenario.NORMAL)
@@ -52,7 +55,9 @@ class PrototypeController(
         liveJob = runs::hasLiveJob
     }
 
-    private val creator = CreationController(compiler, modelCompiler, engine, cards, lane, scope, now, newId, ::notify)
+    private val library = TemplateLibrary(templateStore)
+    private val creator = CreationController(compiler, personalCompiler, modelCompiler, engine, cards, lane, scope, now, newId, ::notify, library)
+    private val editorState = combine(creator.draft, library.state, ::Pair)
     private val sequence = MutableStateFlow<SequenceStatus?>(null)
     private var sequenceJob: Job? = null
     private var nextItem: CompletableDeferred<Unit>? = null
@@ -61,18 +66,31 @@ class PrototypeController(
     private var resetting = false
 
     // Eagerly：应用 scope 一直订阅，不依赖界面是否在收集。初始值只有模板，卡片要等 initialize。
-    val state: StateFlow<PrototypeState> = combine(cards.state, creator.draft, scenario, notice, sequence) {
-            collection, draft, selectedScenario, message, runningSequence ->
+    val state: StateFlow<PrototypeState> = combine(cards.state, editorState, scenario, notice, sequence) {
+            collection, editor, selectedScenario, message, runningSequence ->
         PrototypeState(
             loading = collection.loading, cards = collection.cards, templates = templates,
-            draft = draft, scenario = selectedScenario, notice = message, sequence = runningSequence,
+            draft = editor.first, scenario = selectedScenario, notice = message, sequence = runningSequence,
+            personalTemplates = editor.second,
         )
     }.stateIn(scope, SharingStarted.Eagerly, PrototypeState(templates = templates))
 
     val actions = PrototypeActions(
         openCreator = { if (!resetting && !cards.state.value.loading && sequence.value == null) creator.open(it) },
         closeCreator = creator::close,
+        openTemplateEditor = { id ->
+            if (!resetting && !cards.state.value.loading && sequence.value == null) creator.openTemplateEditor(id)
+        },
+        chooseDraftTemplate = creator::chooseTemplate,
+        changeDisplayFields = creator::changeDisplayFields,
+        changeTemplateDescription = creator::changeDescription,
+        keepTemplateDraft = { creator.saveTemplate(verified = false) },
+        deleteTemplate = { id -> scope.launch {
+            if (!library.update { list -> list.filterNot { it.id == id } }) notify("模板删除失败，请重试。")
+        } },
+        changeRouteOid = creator::changeRouteOid,
         changeOrderNumber = creator::changeOrderNumber,
+        prepareTemplate = { creator.trial(prepare = true) },
         generateCandidate = { creator.trial(generate = true) },
         changeCardRule = { id, rollback ->
             if (!resetting && sequence.value == null && !runs.hasLiveJob(id)) {
@@ -94,6 +112,10 @@ class PrototypeController(
         },
         saveDraft = creator::save,
         refreshCard = { if (!resetting && sequence.value == null) runs.start(it) },
+        // 只改收藏字段，保留并发查询提交的最新快照。
+        toggleFavorite = { id -> if (!resetting) scope.launch {
+            cards.update { list -> list.map { if (it.id == id) it.copy(favorite = !it.favorite) else it } }
+        } },
         cancelCard = runs::cancel,
         resumeCard = {
             if (!resetting && sequence.value == null) {
@@ -111,6 +133,19 @@ class PrototypeController(
         resetDemo = ::reset,
         dismissNotice = { notice.value = null },
     )
+
+    /** 只更新这张卡的本机路由字段，删除卡片会同时删除路由。 */
+    fun updateLocalRoute(id: String, oid: String?) {
+        if (!resetting) scope.launch {
+            cards.update { list ->
+                list.map { card ->
+                    if (card.id != id) card else card.localTarget?.let {
+                        card.copy(localTarget = it.copy(routeOid = oid))
+                    } ?: card
+                }
+            }
+        }
+    }
 
     /** 模型草稿与普通创建共用同一个试运行和保存入口。 */
     fun openModelCreator(template: TemplateDefinition) {
@@ -150,6 +185,7 @@ class PrototypeController(
     suspend fun initialize() {
         if (initialized) return
         initialized = true
+        if (!library.initialize()) notify("无法载入个人模板。请保留原文件并重试启动。")
         cards.initialize(initialCards())
     }
 

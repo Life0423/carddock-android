@@ -1,0 +1,151 @@
+package com.life0423.carddock.core.session
+
+import com.life0423.carddock.core.engine.RuleEngine
+import com.life0423.carddock.core.model.LocalTarget
+import com.life0423.carddock.core.model.PersonalTemplate
+import com.life0423.carddock.core.model.RunPhase
+import com.life0423.carddock.core.model.TemplateDefinition
+import com.life0423.carddock.core.model.TemplateKind
+import com.life0423.carddock.core.port.CompileResult
+import com.life0423.carddock.core.port.DeviceGateway
+import com.life0423.carddock.core.port.DeviceResponse
+import com.life0423.carddock.core.port.DeviceSnapshot
+import com.life0423.carddock.core.port.ReadOptions
+import com.life0423.carddock.core.port.RuleCompiler
+import com.life0423.carddock.core.port.TemplateStore
+import com.life0423.carddock.core.port.orderIdentity
+import com.life0423.carddock.core.rule.RuleSpec
+import com.life0423.carddock.core.rule.RuleStep
+import com.life0423.carddock.core.testing.MemoryCardStore
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import org.junit.Assert.*
+import org.junit.Test
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class PersonalTemplateTest {
+    @Test fun verifiedDefinitionAndCardHaveSeparateStorageAndVersion() = runTest {
+        val rule = RuleSpec(id = "order", sourceId = "orders", targetKey = "completed", steps = listOf(
+            RuleStep.AssertTarget("completed"), RuleStep.ReadField("status", "status", "状态"),
+        ))
+        val builtIn = TemplateDefinition("orders", "订单", "核验已完成订单", TemplateKind.DELIVERY, "核验订单",
+            rule, requiresOrderNumber = true)
+        val number = "12345678901234567890123"
+        val route = "1234567890123456789"
+        val library = object : TemplateStore {
+            var disk = emptyList<PersonalTemplate>()
+            var failWrite = false
+            override suspend fun load() = disk
+            override suspend fun save(templates: List<PersonalTemplate>) {
+                if (failWrite) throw java.io.IOException()
+                disk = templates
+            }
+        }
+        val cards = MemoryCardStore(emptyList())
+        val gateway = object : DeviceGateway {
+            override suspend fun inspect(sourceId: String, targetKey: String) = error("Missing target")
+            override suspend fun inspect(sourceId: String, targetKey: String, options: ReadOptions): DeviceResponse {
+                assertEquals(LocalTarget(number, route), options.localTarget)
+                return DeviceResponse.Ready(DeviceSnapshot(sourceId, orderIdentity(number), mapOf("status" to "已完成")))
+            }
+        }
+        val compiler = object : RuleCompiler {
+            override suspend fun compile(prompt: String) = CompileResult.Unsupported("已选模板应直接执行")
+        }
+        fun controller() = PrototypeController(cards, compiler, RuleEngine(gateway), listOf(builtIn), backgroundScope,
+            templateStore = library)
+        var controller = controller()
+        controller.initialize()
+        runCurrent()
+
+        var actions = controller.actions
+        actions.openTemplateEditor(null)
+        actions.changePrompt("仅保存本机需求，尚无匹配能力")
+        actions.keepTemplateDraft()
+        runCurrent()
+        val draftId = library.disk.single().id
+        assertNull(library.disk.single().published)
+        actions.openTemplateEditor(draftId)
+        runCurrent()
+        assertEquals("仅保存本机需求，尚无匹配能力", controller.state.value.draft?.prompt)
+        actions.chooseDraftTemplate(builtIn)
+        actions.changePrompt("换一个查询来源")
+        runCurrent()
+        assertEquals("", controller.state.value.draft?.title)
+        assertEquals("", controller.state.value.draft?.description)
+        actions.chooseDraftTemplate(builtIn)
+        actions.changeTitle("我命名的订单")
+        actions.changePrompt("调整展示内容")
+        runCurrent()
+        assertEquals("我命名的订单", controller.state.value.draft?.title)
+        actions.chooseDraftTemplate(builtIn)
+        actions.changeOrderNumber(number)
+        actions.changeRouteOid(route)
+        actions.saveDraft()
+        assertNull(library.disk.single().published)
+        actions.keepTemplateDraft()
+        runCurrent()
+        val id = library.disk.single().id
+        assertNull(library.disk.single().published)
+
+        controller = controller()
+        controller.initialize()
+        runCurrent()
+        actions = controller.actions
+        actions.openTemplateEditor(id)
+        runCurrent()
+        assertEquals("", controller.state.value.draft?.orderNumber)
+        assertNull(controller.state.value.draft?.preview)
+        actions.changeOrderNumber(number)
+        actions.changeRouteOid(route)
+        actions.trialDraft()
+        runCurrent()
+        assertEquals(RunPhase.SUCCEEDED, controller.state.value.draft?.phase)
+        library.failWrite = true
+        actions.saveDraft()
+        runCurrent()
+        assertNotNull(controller.state.value.draft?.preview)
+        assertNull(library.disk.single().published)
+        library.failWrite = false
+        actions.changeDisplayFields(listOf(com.life0423.carddock.core.model.DisplayField("status", "进度")))
+        actions.saveDraft()
+        runCurrent()
+        assertNull(library.disk.single().published)
+        actions.trialDraft()
+        runCurrent()
+        actions.changeTitle("个人订单")
+        actions.saveDraft()
+        runCurrent()
+        val published = requireNotNull(library.disk.single().published)
+        val exported = Json.encodeToString(library.disk)
+        assertFalse(exported.contains(number) || exported.contains(route) || exported.contains("已完成\""))
+        assertTrue(cards.disk!!.isEmpty())
+
+        actions.openCreator(published)
+        actions.changeOrderNumber(number)
+        actions.changeRouteOid(route)
+        actions.trialDraft()
+        runCurrent()
+        actions.changeRouteOid("0000000000000000000")
+        actions.saveDraft()
+        runCurrent()
+        assertTrue(cards.disk!!.isEmpty())
+        actions.changeRouteOid(route)
+        actions.trialDraft()
+        runCurrent()
+        actions.saveDraft()
+        runCurrent()
+        val saved = cards.disk!!.single()
+        assertEquals("进度", saved.display.single().label)
+        assertEquals(LocalTarget(number, route), saved.localTarget)
+        assertEquals(id, saved.sourceTemplateId)
+        assertEquals(1, saved.sourceTemplateRevision)
+        actions.deleteTemplate(id)
+        runCurrent()
+        actions.refreshCard(saved.id)
+        runCurrent()
+        assertEquals(RunPhase.SUCCEEDED, cards.disk!!.single().run?.phase)
+    }
+}

@@ -3,6 +3,7 @@ package com.life0423.carddock.platform
 import com.life0423.carddock.core.model.AppPrice
 
 internal const val MEITUAN_PACKAGE = "com.sankuai.meituan"
+internal const val MEITUAN_LATEST = "meituan.takeout.latest"
 internal const val MEITUAN_TARGET = "meituan.completed-order"
 internal const val JD_PACKAGE = "com.jingdong.app.mall"
 
@@ -19,6 +20,8 @@ internal data class DetailNode(
     val role: String?,
     val label: String,
     val visible: Boolean,
+    val bounds: android.graphics.Rect? = null,
+    val scrollable: Boolean = false,
 )
 internal data class DetailWindow(val source: String?, val nodes: List<DetailNode>, val password: Boolean)
 internal data class OrderEvidence(val number: String, val status: String, val time: String)
@@ -38,8 +41,32 @@ internal fun DetailWindow.isLogin(): Boolean {
         ("登录" in labels && labels.any { "手机号" in it || "验证码" in it })
 }
 
+/** 只识别已观察到的折叠订单信息行，避免点击首页或其他模块里的同名文本。 */
+internal fun DetailWindow.hasCollapsedMeituanOrder(): Boolean {
+    val legacy = nodes.indices.filter { nodes[it].id in setOf("$MEITUAN_PACKAGE:id/ii7", "$MEITUAN_PACKAGE:id/ifs") }
+    val detail = if (legacy.isEmpty()) {
+        val root = nodes.indices.singleOrNull { nodes[it].id == "$MEITUAN_PACKAGE:id/q04" } ?: return false
+        nodes.visibleSubtree(root, true).singleOrNull { it.value.id == "$MEITUAN_PACKAGE:id/uxj" }?.index
+    } else legacy.singleOrNull()
+    val rows = nodes.visibleSubtree(detail ?: return false, includeContainers = true)
+    val info = rows.singleOrNull { it.value.visible && it.value.label == "订单信息" } ?: return false
+    val fields = nodes.visibleSubtree(info.value.parent)
+    return fields.any { it.value.label == "配送骑手/支付方式等" } && fields.none { it.value.label == "订单号码" }
+}
+
 /** 完成状态、订单号和时间必须来自同一个订单详情容器。 */
 internal fun DetailWindow.readOrder(): OrderEvidence? {
+    // 当前 vivo 美团将状态与订单信息放在同一详情列表的不同子项。
+    val detail = nodes.indices.singleOrNull { nodes[it].id == "$MEITUAN_PACKAGE:id/q04" }
+    if (detail != null) {
+        val list = nodes.visibleSubtree(detail, true).singleOrNull { it.value.id == "$MEITUAN_PACKAGE:id/uxj" }
+        if (list != null) {
+            val rows = nodes.visibleSubtree(list.index, true)
+            val header = rows.singleOrNull { it.value.id == "$MEITUAN_PACKAGE:id/c9_" } ?: return null
+            val status = nodes.visibleSubtree(header.index, true).singleOrNull { it.value.visible && it.value.label == "订单已完成" } ?: return null
+            return readOrderFields(rows, status.value.label)
+        }
+    }
     val root = nodes.indices.singleOrNull {
         nodes[it].id == "$MEITUAN_PACKAGE:id/ii7" || nodes[it].visible && nodes[it].id == "$MEITUAN_PACKAGE:id/ifs"
     } ?: return null
@@ -47,13 +74,26 @@ internal fun DetailWindow.readOrder(): OrderEvidence? {
     val currentLayout = nodes[root].id == "$MEITUAN_PACKAGE:id/ii7"
     // vivo 会把结构容器标成不可见，核验字段仍须来自可见节点。
     val rows = nodes.visibleSubtree(root, includeContainers = currentLayout)
+    val list = if (currentLayout) rows.singleOrNull { it.value.id == "$MEITUAN_PACKAGE:id/kr1" }
+        ?: return null else null
     val headerId = if (currentLayout) "sur" else "r19"
     val header = rows.singleOrNull { it.value.id == "$MEITUAN_PACKAGE:id/$headerId" } ?: return null
-    val status = nodes.visibleSubtree(header.index).singleOrNull { it.value.label == "订单已完成" }?.value?.label ?: return null
-    val infoContainer = if (currentLayout) {
-        val list = rows.singleOrNull { it.value.id == "$MEITUAN_PACKAGE:id/kr1" } ?: return null
-        nodes.visibleSubtree(list.index)
-    } else rows
+    var status = nodes.visibleSubtree(header.index).singleOrNull { it.value.label == "订单已完成" }?.value?.label
+    if (status == null && list != null) {
+        // 后台屏上的新版详情把完成状态移到同一详情列表的首个状态区。
+        val statusRow = rows.singleOrNull {
+            it.value.parent == list.index && it.value.id == "$MEITUAN_PACKAGE:id/o73"
+        } ?: return null
+        val statusBlock = nodes.visibleSubtree(statusRow.index, includeContainers = true)
+            .singleOrNull { it.value.parent == statusRow.index && it.value.id == "$MEITUAN_PACKAGE:id/gme" }
+            ?: return null
+        status = nodes.visibleSubtree(statusBlock.index).singleOrNull { it.value.label == "订单已完成" }?.value?.label
+    }
+    if (status == null) return null
+    return readOrderFields(if (list != null) nodes.visibleSubtree(list.index) else rows, status)
+}
+
+private fun DetailWindow.readOrderFields(infoContainer: List<IndexedValue<DetailNode>>, status: String): OrderEvidence? {
     val info = infoContainer.singleOrNull { it.value.visible && it.value.label == "订单信息" } ?: return null
     val infoRows = nodes.visibleSubtree(info.value.parent)
     val numberRow = infoRows.singleOrNull { it.value.label == "订单号码" } ?: return null
