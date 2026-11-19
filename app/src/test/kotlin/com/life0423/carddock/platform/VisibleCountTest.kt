@@ -25,6 +25,30 @@ class VisibleCountTest {
         assertEquals("5 项", (next as DeviceResponse.Ready).snapshot.fields["quantity"])
     }
 
+    /** 多行复用同一套控件，示范须锁定完整名称。另一行数值变化不能改变选择。 */
+    @Test fun partialLabelsDemonstrateOnceThenReplayOnlyTheChosenRow() = runTest {
+        fun screen(first: String, second: String) = DetailWindow("sample", listOf(
+            DetailNode(-1,"row","group","",true),
+            DetailNode(0,"label","android.widget.TextView","寄出件",true),
+            DetailNode(0,"value","android.widget.TextView",first,true),
+            DetailNode(-1,"row","group","",true),
+            DetailNode(3,"label","android.widget.TextView","签收件",true),
+            DetailNode(3,"value","android.widget.TextView",second,true),
+            DetailNode(-1,"toolbar","group","",true),
+            DetailNode(6,"page_title","android.widget.TextView","签收件",true),
+        ),false)
+        var options = emptyList<CountField>()
+        readVisibleCount("sample",null,"件",null,{true},{screen("5 项","5 项")},{ _, _ -> false }) { fields, structure ->
+            assertFalse("签收件" in structure || "5 项" in structure)
+            options = fields
+            null
+        }
+        assertEquals(listOf("寄出件","签收件"),options.map { it.route.subject })
+        val saved = options.last().route
+        val result = readVisibleCount("sample",null,saved.subject,saved,{true},{screen("6 项","7 项")},{ _, _ -> false },null)
+        assertEquals("7 项",(result as DeviceResponse.Ready).snapshot.fields["quantity"])
+    }
+
     @Test fun foreignLabelStopsAssociation() = runTest {
         val result = readVisibleCount("sample", null, "书籍", null, { true }, { row("书籍","报刊","12 项") },
             { _, _ -> false }) { _, _ -> error("不能将报刊数量归给书籍") }

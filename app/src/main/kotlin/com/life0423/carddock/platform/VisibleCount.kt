@@ -55,31 +55,33 @@ internal suspend fun readVisibleCount(source: String, page: String?, subject: St
             }
             fun anchor(i: Int) = FieldAnchor(nodes[i].role.orEmpty(), nodes.getOrNull(nodes[i].parent)?.role.orEmpty(), nodes[i].id)
             waiting = "页面中未找到指定分类。"
-            val labels = nodes.indices.filter { nodes[it].visible && nodes[it].label == subject && nodes[it].parent >= 0 }
-            if (labels.size > 1) return@withTimeoutOrNull DeviceResponse.NeedsUser("页面里有多个同名分类，请指定更明确的页面。")
-            val label = labels.singleOrNull() ?: continue
-            val siblings = nodes.indices.filter { nodes[it].parent == nodes[label].parent && nodes[it].visible }
-            val textSiblings = siblings.filter { nodes[it].label.isNotBlank() }
-            val otherLabels = textSiblings.filter { it != label && !countText.matches(nodes[it].label) }
-            val owned = if (otherLabels.isEmpty()) textSiblings else
-                textSiblings.dropWhile { it != label }.drop(1).takeWhile { it !in otherLabels }
-            val fields = owned.filter { it != label && countText.matches(nodes[it].label) }.map {
-                CountField(CountRoute(page, subject, anchor(label), anchor(it)), nodes[it].label, it)
-            }
-            if (fields.isEmpty()) { waiting = "分类旁未读到可核验的数量。"; continue }
-            val field = if (saved != null) fields.singleOrNull { it.route == saved } else {
-                // 只发送本组节点的序号、控件大类和取值形态。实际文字、数字和包名都留在设备上。
-                val shape = siblings.joinToString("\n") {
-                    val type = when {
-                        it == label -> "requested-label"
-                        fields.any { candidate -> candidate.index == it } -> "quantity"
-                        else -> "other"
+            val visible = nodes.indices.filter { nodes[it].visible && nodes[it].parent >= 0 }
+            val exact = visible.filter { nodes[it].label == subject }
+            val fields = mutableListOf<CountField>()
+            val shape = StringBuilder()
+            // 同名页签或标题未必是数据行。先核对行内字段，再用完整锚点判定是否唯一。
+            fun collectFields(labels: List<Int>, match: String) {
+                for (label in labels) {
+                    val siblings = visible.filter { nodes[it].parent == nodes[label].parent && nodes[it].label.isNotBlank() }
+                    val otherLabels = siblings.filter { it != label && !countText.matches(nodes[it].label) }
+                    val owned = if (otherLabels.isEmpty()) siblings else
+                        siblings.dropWhile { it != label }.drop(1).takeWhile { it !in otherLabels }
+                    val quantities = owned.filter { it != label && countText.matches(nodes[it].label) }
+                    if (quantities.isEmpty()) continue
+                    shape.appendLine("$label $match")
+                    for (i in quantities) {
+                        fields += CountField(CountRoute(page, nodes[label].label, anchor(label), anchor(i)), nodes[i].label, i)
+                        shape.appendLine("$i quantity grouped-with=$label")
                     }
-                    val role = if (nodes[it].role == "android.widget.TextView") "text" else "view"
-                    "$it sibling $role $type"
                 }
-                choose?.invoke(fields, shape)
             }
+            collectFields(exact, "requested-label")
+            if (saved == null && fields.isEmpty()) {
+                collectFields(visible.filter { nodes[it].role == "android.widget.TextView" &&
+                    nodes[it].label != subject && nodes[it].label.endsWith(subject) }, "partial-label")
+            }
+            if (fields.isEmpty()) { waiting = "未读到与指定分类对应的数量。"; continue }
+            val field = if (saved != null) fields.singleOrNull { it.route == saved } else choose?.invoke(fields, shape.toString())
             if (field == null || fields.count { it.route == field.route } != 1)
                 return@withTimeoutOrNull DeviceResponse.NeedsUser("无法唯一核对数量字段。")
             return@withTimeoutOrNull DeviceResponse.Ready(DeviceSnapshot(source, COUNT_TARGET, mapOf("quantity" to field.value), "本机页面核验"))

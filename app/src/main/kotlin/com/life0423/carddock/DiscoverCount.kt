@@ -39,10 +39,9 @@ internal suspend fun discoverCount(context: Context, settings: ModelSettings, de
     fun candidate(field: CountField) = DiscoveredTemplate(countTemplate(pkg, demand, field.route), mapOf("quantity" to field.value))
     val result = try {
         device.count(pkg, page, subject) { fields, shape ->
-            if (fields.size == 1) {
-                val answer = requestModel(config, "用户要读取与 requested-label 同组的数量。以下是脱敏控件。只返回对应节点的整数序号，不能确定时返回 -1。\n$shape")
-                picked = fields.singleOrNull { it.index == answer.trim().toIntOrNull() }
-            }
+            val answer = requestModel(config, "用户要查询一个分类的数量。以下为脱敏结构。requested-label 是精确匹配，partial-label 只匹配了部分名称。仅在精确且唯一时返回数量节点序号。多个可能分类或字段时返回 -1。\n$shape")
+            // 模型不能替用户决定部分匹配的分类，即使两个候选当前的数值不同。
+            picked = fields.singleOrNull()?.takeIf { it.route.subject == subject && it.index == answer.trim().toIntOrNull() }
             if (picked == null && fields.distinctBy { it.route }.size == fields.size)
                 demonstration = fields.map(::candidate)
             picked

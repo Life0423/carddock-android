@@ -125,7 +125,8 @@ internal fun CreatorScreen(
                 }
                 draft.demonstrations.forEachIndexed { index, candidate ->
                     FilledTonalButton(onClick = { actions.demonstrateField(index) }, enabled = !busy) {
-                        Text("第${index + 1}项 · " + candidate.observed.values.joinToString())
+                        val name = candidate.template.rule.countRoute?.subject.orEmpty()
+                        Text("第${index + 1}项 · $name · " + candidate.observed.values.joinToString())
                     }
                 }
                 if (editingTemplate && draft.template == null) FilledTonalButton(
