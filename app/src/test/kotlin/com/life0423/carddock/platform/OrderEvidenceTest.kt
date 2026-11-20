@@ -99,15 +99,24 @@ class OrderEvidenceTest {
         assertEquals(listOf("筛选"),taps)
     }
 
-    @Test fun billDateGestureRequiresUncoveredRowInVisibleCollection() {
+    @Test fun receiptTargetGestureRequiresUncoveredRowInVisibleCollection() {
         val root = DetailNode(-1,null,null,"",true,Rect(0,0,300,600))
         val list = root.copy(parent=0,scrollable=true,drawingOrder=1)
         val date = field("10-22 12:35",150).copy(parent=1,drawingOrder=1)
         val overlay = root.copy(parent=0,drawingOrder=2)
-        assertTrue(DetailWindow("sample",listOf(root,list,date),false).exposesBillDate(date))
-        assertFalse(DetailWindow("sample",listOf(root,list,date,overlay),false).exposesBillDate(date))
-        assertFalse(DetailWindow("sample",listOf(root,list.copy(scrollable=false),date),false).exposesBillDate(date))
-        assertFalse(DetailWindow("sample",listOf(root,list,date,date.copy()),false).exposesBillDate(date))
+        assertTrue(DetailWindow("sample",listOf(root,list,date),false).exposesReceiptTarget(date))
+        assertFalse(DetailWindow("sample",listOf(root,list,date,overlay),false).exposesReceiptTarget(date))
+        assertFalse(DetailWindow("sample",listOf(root,list.copy(scrollable=false),date),false).exposesReceiptTarget(date))
+        assertFalse(DetailWindow("sample",listOf(root,list,date,date.copy()),false).exposesReceiptTarget(date))
+    }
+
+    @Test fun originalOrderLinkNeedsSameVisibleSuccessfulReceipt() {
+        val root = DetailNode(-1,null,null,"",true,Rect(0,0,300,600))
+        val link = field("查看原订单",300).copy(parent=0)
+        val paid = field("支付成功",120).copy(parent=0)
+        assertTrue(DetailWindow("sample",listOf(root,paid,link),false).exposesReceiptTarget(link))
+        assertFalse(DetailWindow("sample",listOf(root,link),false).exposesReceiptTarget(link))
+        assertFalse(DetailWindow("sample",listOf(root,paid,link,root.copy(parent=0,drawingOrder=3)),false).exposesReceiptTarget(link))
     }
 
     @Test fun paidReceiptMustLinkToSameOrderAndSecond() = runTest {

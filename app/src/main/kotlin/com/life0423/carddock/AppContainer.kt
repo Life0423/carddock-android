@@ -113,7 +113,14 @@ class AppContainer(private val context: Context) {
         templateStore = AtomicTemplateStore(context, json),
         compiler = MockRuleCompiler(templates),
         personalCompiler = PersonalRuleCompiler,
-        discover = { demand, compareFilter -> discoverReminder(context, modelSettings, nativeDevice, demand)
+        verifyPickup = { entry -> withContext(Dispatchers.IO) {
+            when (val result = nativeDevice.pickupCode(entry)) {
+                is DeviceResponse.Ready -> null
+                is DeviceResponse.NeedsUser -> result.message
+                is DeviceResponse.Failed -> result.message
+            }
+        } },
+        discover = { demand, compareFilter -> discoverPickup(nativeDevice, demand) ?: discoverReminder(context, modelSettings, nativeDevice, demand)
             ?: discoverCount(context, modelSettings, nativeDevice, demand)
             ?: discoverOrders(context, modelSettings, nativeDevice, demand, compareFilter) },
         engine = RuleEngine(routedDevice),

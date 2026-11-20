@@ -1,5 +1,6 @@
 package com.life0423.carddock.core.session
 
+import com.life0423.carddock.core.model.PickupEntry
 import com.life0423.carddock.core.engine.RuleEngine
 import com.life0423.carddock.core.model.CardRecord
 import com.life0423.carddock.core.model.RunPhase
@@ -41,6 +42,7 @@ class PrototypeController(
     private val replacementTemplate: ((CardRecord, List<CardRecord>, Boolean) -> TemplateDefinition?)? = null,
     templateStore: TemplateStore? = null,
     personalCompiler: RuleCompiler = compiler,
+    verifyPickup: suspend (PickupEntry) -> String? = { "本机无法核验亮码入口。" },
     discover: (suspend (String, Boolean) -> com.life0423.carddock.core.port.DiscoveryResult?)? = null,
 ) {
     private val notice = MutableStateFlow<String?>(null)
@@ -57,7 +59,7 @@ class PrototypeController(
     }
 
     private val library = TemplateLibrary(templateStore)
-    private val creator = CreationController(compiler, personalCompiler, modelCompiler, engine, cards, lane, scope, now, newId, ::notify, library, discover)
+    private val creator = CreationController(compiler, personalCompiler, modelCompiler, engine, cards, lane, scope, now, newId, ::notify, library, discover, verifyPickup)
     private val editorState = combine(creator.draft, library.state, ::Pair)
     private val sequence = MutableStateFlow<SequenceStatus?>(null)
     private var sequenceJob: Job? = null

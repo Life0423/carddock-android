@@ -90,6 +90,12 @@ data class AppPrice(
     val verifiedAt: Long,
 )
 
+/** 个人取件卡只保存用户验证过的入口名称；官方身份码始终留在来源应用。 */
+@Serializable
+enum class PickupEntry(val label: String) {
+    OUTBOUND("出库码"), IDENTITY("身份码"), PICKUP_ID("取件身份码"), STATION_ID("驿站身份码")
+}
+
 /** 卡片的持久化形态。snapshot 为空表示还没有核验通过的结果。run 是最近一次尝试，可以没有。 */
 @Serializable
 data class CardRecord(
@@ -107,6 +113,7 @@ data class CardRecord(
     val sourceTemplateId: String? = null,
     val sourceTemplateRevision: Int? = null,
     val display: List<DisplayField> = emptyList(),
+    val pickupEntry: PickupEntry? = null,
 )
 
 /** 一条可试运行的演示模板。examplePrompt 只负责预填，编译器仍按用户最终输入分流，不按模板 id。 */
@@ -121,4 +128,5 @@ data class TemplateDefinition(
     val requiresOrderNumber: Boolean = false,
     val revision: Int = 1,
     val display: List<DisplayField> = emptyList(),
+    val pickupEntry: PickupEntry? = null,
 )

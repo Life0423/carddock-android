@@ -98,7 +98,9 @@ private class DisplayService(private val shell: Context, private val uid: Int) :
 
     override fun openCainiao(surface: Surface, width: Int, height: Int, density: Int): Int =
         open(surface, width, height, density, CAINIAO_PACKAGE,
+            // 使用独立任务，避免亮码后保留在主屏的菜鸟任务被普通刷新复用。
             Intent(Intent.ACTION_VIEW, Uri.parse("guoguo://go/home_page"))
+                .addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
                 .setClassName(CAINIAO_PACKAGE, "$CAINIAO_PACKAGE.homepage.view.activity.HomePageActivity"))
 
     override fun openMeituan(surface: Surface, width: Int, height: Int, density: Int, oid: String): Int {

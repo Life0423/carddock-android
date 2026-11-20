@@ -127,7 +127,7 @@ internal fun CreatorScreen(
                 draft.demonstrations.forEachIndexed { index, candidate ->
                     FilledTonalButton(onClick = { actions.demonstrateField(index) }, enabled = !busy) {
                         val name = candidate.template.rule.countRoute?.subject.orEmpty()
-                        Text("第${index + 1}项 · $name · " + candidate.observed.values.joinToString())
+                        Text(candidate.template.pickupEntry?.label ?: ("第${index + 1}项 · $name · " + candidate.observed.values.joinToString()))
                     }
                 }
                 if (editingTemplate && draft.template == null) FilledTonalButton(
@@ -177,7 +177,7 @@ internal fun CreatorScreen(
                         )
                     }
                 }
-                if (draft.modelCandidate || modelAvailable && draft.template?.rule?.targetKey == "cainiao.pickup.empty" && !changingRule) {
+                if (draft.modelCandidate || modelAvailable && draft.template?.pickupEntry == null && draft.template?.rule?.targetKey == "cainiao.pickup.empty" && !changingRule) {
                     FilledTonalButton(onClick = actions.generateCandidate, enabled = !busy) {
                         Text("生成菜鸟候选")
                     }
@@ -253,6 +253,7 @@ internal fun CreatorScreen(
                                 Text("卡片预览", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                             }
                             SnapshotFields(preview.displayFields(draft.template?.display.orEmpty()))
+                            draft.template?.pickupEntry?.let { PickupCodeButton(it, enabled = !busy) }
                             Text(preview.sourceLabel + " · " + formatTimestamp(preview.fetchedAt), color = DockColors.Muted, style = MaterialTheme.typography.labelSmall)
                         }
                     }

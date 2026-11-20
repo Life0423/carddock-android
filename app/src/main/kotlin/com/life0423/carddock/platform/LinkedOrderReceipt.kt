@@ -5,14 +5,17 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import java.time.format.DateTimeFormatter
 
-/** 只允许补点位于交易视口内且没有被同层兄弟分支遮挡的日期。 */
-internal fun DetailWindow.exposesBillDate(target: DetailNode): Boolean {
+/** 日期须在交易视口；回链须属于当前成功支付凭证。两者都要求唯一标签及无遮挡的点击区域。 */
+internal fun DetailWindow.exposesReceiptTarget(target: DetailNode): Boolean {
     val box = target.bounds ?: return false
     if (password || box.isEmpty) return false
-    val date = nodes.singleOrNull { it.visible && it.role == target.role &&
+    val field = nodes.singleOrNull { it.visible && it.role == target.role &&
         it.label == target.label && it.bounds == box } ?: return false
-    val path = orderPath(date)
-    if (path.none { i -> nodes[i].scrollable && nodes[i].bounds?.contains(box) == true }) return false
+    val path = orderPath(field)
+    if (field.label == "查看原订单") {
+        val status = uniqueOrderNode(nodes.filter { it.visible && it.label == "支付成功" && it.bounds?.isEmpty == false }) ?: return false
+        if (!sameOrderSurface(status,field)) return false
+    } else if (path.none { i -> nodes[i].scrollable && nodes[i].bounds?.contains(box) == true }) return false
     val x = box.centerX()
     val y = box.centerY()
     return path.drop(1).none { i ->
@@ -30,7 +33,7 @@ internal class LinkedOrderReceipt(private val target: OrderObservation, private 
 
     suspend fun read(
         connected: () -> Boolean, observe: () -> DetailWindow?, tap: (DetailNode) -> Boolean,
-        scroll: (DetailNode) -> Boolean, tapBillDate: (DetailNode) -> Boolean = tap
+        scroll: (DetailNode) -> Boolean, tapReceipt: (DetailNode) -> Boolean = tap
     ): Long? = withTimeoutOrNull(45000) {
         val day = target.placed.format(DateTimeFormatter.ofPattern("MM-dd"))
         val date = Regex("""(?:\d{4}-)?\d\d-\d\d \d\d:\d\d(?::\d\d)?""")
@@ -71,8 +74,14 @@ internal class LinkedOrderReceipt(private val target: OrderObservation, private 
                     .mapNotNull { Regex("""[-−]\s*(?:[¥￥]\s*)?(\d{1,9}(?:\.\d{1,2})?)""").matchEntire(it.label)
                         ?.groupValues?.get(1)?.toBigDecimal()?.movePointRight(2)?.longValueExact() }.distinct()
                 stage = "核对支付成功金额（候选 ${debits.size}）"
-                val paid = debits.singleOrNull()?.takeIf { it == orderTotal } ?: return@withTimeoutOrNull null
-                if (tap(backLink)) amount = paid
+                val paid = debits.singleOrNull() ?: return@withTimeoutOrNull null
+                if (paid != orderTotal) {
+                    stage = "该笔扣款与原订单合计不同"
+                    return@withTimeoutOrNull null
+                }
+                stage = "金额一致，打开官方原单回链"
+                if (!tapReceipt(backLink)) return@withTimeoutOrNull null
+                amount = paid
                 continue
             }
             if (inBills) {
@@ -87,7 +96,7 @@ internal class LinkedOrderReceipt(private val target: OrderObservation, private 
                 if (rows.size > 1) return@withTimeoutOrNull null
                 if (rows.size == 1) {
                     stage = "打开已定位的同日交易"
-                    if (!tapBillDate(rows.single())) return@withTimeoutOrNull null
+                    if (!tapReceipt(rows.single())) return@withTimeoutOrNull null
                     openedCandidate = true
                     continue
                 }

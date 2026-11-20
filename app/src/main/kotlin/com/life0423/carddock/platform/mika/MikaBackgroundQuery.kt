@@ -1,5 +1,6 @@
 package com.life0423.carddock.platform.mika
 
+import com.life0423.carddock.core.model.PickupEntry
 import com.life0423.carddock.core.rule.CountRoute
 import com.life0423.carddock.platform.orderActionBounds
 import com.life0423.carddock.platform.CountField
@@ -42,7 +43,7 @@ internal class MikaBackgroundQuery(private val context: Context, private val foc
                 page
             },
             disconnected = "卡坞离开前台或页面读取服务断开，已停止查询。",
-            missing = "后台屏未核验到菜鸟待取空状态。",
+            missing = if (targetKey == com.life0423.carddock.platform.CAINIAO_STATUS_TARGET) "未读到明确的待取件数或空状态。请在菜鸟核对后重试。" else "后台屏未核验到菜鸟待取空状态。",
         ).inspect(sourceId, targetKey)
     }
 
@@ -103,12 +104,22 @@ internal class MikaBackgroundQuery(private val context: Context, private val foc
                     scroll = { connected() && it.bounds?.let { box -> reader.advanceCollection(id,source,box) } == true }, choose,
                     sample = if (scan.compareFilter) frame::buttonColors else null,
                     panelVisible = { frame.enablePanel(scan.compareFilter && it) },
-                    tapBillDate = { node -> connected() && reader.tapReadTarget(id,source,node,
-                        lastWindow?.orderActionBounds(node) ?: node.bounds, keepGestureOnLabel = true, billDate = true) })
+                    tapReceipt = { node -> connected() && reader.tapReadTarget(id,source,node,
+                        lastWindow?.orderActionBounds(node) ?: node.bounds, keepGestureOnLabel = true, receiptTarget = true) })
             }
             if (!scan.anotherWindow || result !is DeviceResponse.NeedsUser) return result
         } while (true)
     }
+
+    /** query 只在 API 34 及以上创建后台屏。每次从官方首页寻找入口，不采样凭证图像。 */
+    @android.annotation.SuppressLint("NewApi")
+    suspend fun pickupCode(entry: PickupEntry?): DeviceResponse =
+        query("菜鸟", { helper,surface,w,h,dpi -> helper.openCainiao(surface,w,h,dpi) }) {
+            reader,id,connected,_ ->
+            com.life0423.carddock.platform.inspectPickupCode(entry,
+                { reader.clearCache(); reader.observe(id,pickup=true) },
+                { reader.clickBackgroundLabel(id,CAINIAO_PACKAGE,it.label) },connected)
+        }
 
     suspend fun meituan(oid: String): DeviceResponse = query(
         "美团",

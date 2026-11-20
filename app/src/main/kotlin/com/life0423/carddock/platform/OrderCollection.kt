@@ -209,12 +209,12 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
     suspend fun runWindow(connected: () -> Boolean, observe: () -> DetailWindow?, tap: (DetailNode) -> Boolean,
         scroll: (DetailNode) -> Boolean, choose: ((List<String>) -> String?)?,
         sample: (suspend (List<DetailNode>) -> List<Int>?)? = null, panelVisible: (Boolean) -> Unit = {},
-        tapBillDate: (DetailNode) -> Boolean = tap): DeviceResponse {
+        tapReceipt: (DetailNode) -> Boolean = tap): DeviceResponse {
         anotherWindow = false
         awaitingReceipt?.let { (order, total) ->
             stage = "从账单反查原订单"
             val receipt = LinkedOrderReceipt(order, total)
-            val paid = receipt.read(connected, observe, tap, scroll, tapBillDate)
+            val paid = receipt.read(connected, observe, tap, scroll, tapReceipt)
                 ?: return DeviceResponse.NeedsUser("账单扣款与原订单未能逐项核对（${receipt.stage}），未提交总额。")
             current += order.copy(originalPaidCents = paid)
             awaitingReceipt = null

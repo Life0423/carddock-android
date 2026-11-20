@@ -205,7 +205,7 @@ internal class SquareStore(context: Context, url: String, private val scope: Cor
         preferences.getString(profileKey(list), null)?.let { Json.decodeFromString<List<SquareEntry>>(it) }.orEmpty()
 
     private fun capability(template: TemplateDefinition): String? = publicCapabilities.entries.firstOrNull { (_, standard) ->
-        template.requiresOrderNumber == standard.requiresOrderNumber &&
+        template.pickupEntry == null && template.requiresOrderNumber == standard.requiresOrderNumber &&
             template.rule.copy(id = standard.rule.id) == standard.rule
     }?.key
 

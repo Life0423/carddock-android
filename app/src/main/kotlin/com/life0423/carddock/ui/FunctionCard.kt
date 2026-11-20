@@ -121,6 +121,7 @@ internal fun FunctionCard(
                     Text("上次成功 ${formatTimestamp(it.fetchedAt)}", style = MaterialTheme.typography.labelSmall, color = DockColors.Muted)
                 }
             }
+            card.pickupEntry?.let { PickupCodeButton(it, enabled = canStart && !phase.isBusy()) }
             if (onPrice != null) {
                 PriceEvidence(card.appPrice)
                 if (card.priceVerificationFailed && card.appPrice != null) {

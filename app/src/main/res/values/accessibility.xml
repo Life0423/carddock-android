@@ -1,4 +1,4 @@
 <resources>
     <string name="accessibility_label">卡坞 · 页面核验</string>
-    <string name="accessibility_description">仅在你主动试运行或刷新时，在后台屏打开菜鸟并点击「取包裹」，或打开已授权的美团订单并展开订单信息。也可读取当前美团和京东目标页。用于核验待取状态、历史订单和指定商品展示价。不采集密码、不上传页面。可随时在系统设置关闭。</string>
+    <string name="accessibility_description">在你主动试运行或刷新时，卡坞使用页面标题、控件和选定字段核验查询。点「出示身份码」时，在菜鸟首页点已验证的入口，由菜鸟展示本人身份码。亮码只检查导航标记；码值与码图均不保存或发送。可随时在系统设置关闭。</string>
 </resources>

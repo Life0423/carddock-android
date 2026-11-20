@@ -13,6 +13,45 @@ import org.junit.Test
 class CainiaoDeviceGatewayTest {
     private val empty = CainiaoObservation(CAINIAO_PACKAGE, setOf("取包裹", "暂无待取包裹"), false)
 
+    @Test fun demandKeepsTheRequestedActionIntact() {
+        val pattern = com.life0423.carddock.pickupDemand
+        assertTrue(pattern.matches("帮我查待取快递，到驿站时一键出示身份码"))
+        assertTrue(pattern.matches("查快递，到驿站时出示取件身份码"))
+        assertTrue(pattern.matches("查看我有哪些待取包裹并亮码"))
+        assertFalse(pattern.matches("查快递并把身份码发送给QQ"))
+        assertFalse(pattern.matches("查顺丰快递并出示身份码"))
+        assertFalse(pattern.matches("查快递不要出示身份码"))
+    }
+
+    @Test fun pickupRequiresLiveOfficialPageAndNeverReturnsCredential() = runTest {
+        val home = setOf("取包裹","我的","出库码")
+        val terminal = setOf("身份码","身份码刷新提示")
+        suspend fun run(target: Set<String>, pkg: String = CAINIAO_PACKAGE): DeviceResponse {
+            var page = empty.copy(labels=home)
+            return inspectPickupCode(com.life0423.carddock.core.model.PickupEntry.OUTBOUND, { page }, {
+                page = page.copy(packageName=pkg,labels=target)
+                true
+            }, { true })
+        }
+        assertTrue((run(terminal) as DeviceResponse.Ready).snapshot.fields.isEmpty())
+        assertTrue(run(terminal + "待处理") is DeviceResponse.NeedsUser)
+        assertTrue(run(terminal, "other.app") is DeviceResponse.NeedsUser)
+        assertTrue(run(setOf("身份码")) is DeviceResponse.NeedsUser)
+        val choices = inspectPickupCode(null,{ empty.copy(labels=home + "取件身份码") },
+            { error("发现入口时不可点击") },{ true }) as DeviceResponse.Ready
+        assertEquals(setOf("OUTBOUND","PICKUP_ID"),choices.snapshot.fields.keys)
+    }
+
+    @Test fun pickupCountNeedsExplicitUnitsAndUnambiguousPage() = runTest {
+        assertTrue(pickupCountText.matches("2件包裹待取"))
+        assertFalse(pickupCountText.matches("取件码：1234"))
+        val pending = empty.copy(labels=setOf("取包裹"),hasPending=listOf("2件包裹待取","2件包裹待取").any(pickupCountText::matches))
+        val response = CainiaoDeviceGateway({ true },{ pending }).inspect(CAINIAO_PACKAGE,CAINIAO_STATUS_TARGET)
+        assertEquals("有待取包裹",(response as DeviceResponse.Ready).snapshot.fields["status"])
+        assertEquals(CainiaoPage.UNKNOWN,classifyCainiaoPage(pending.copy(labels=empty.labels)))
+        assertEquals(CainiaoPage.UNKNOWN,classifyCainiaoPage(pending.copy(labels=setOf("我的","取包裹"))))
+    }
+
     @Test fun onlyExplicitSameAppEvidenceSucceeds() {
         assertEquals(CainiaoPage.EMPTY, classifyCainiaoPage(empty))
         assertEquals(CainiaoPage.UNKNOWN, classifyCainiaoPage(empty.copy(labels = setOf("暂无待取包裹"))))

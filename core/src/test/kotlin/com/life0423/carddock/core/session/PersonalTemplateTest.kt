@@ -102,6 +102,49 @@ class PersonalTemplateTest {
         }
     }
 
+    @Test fun pickupActionMustReplayTwiceBeforePublishingAndOnceForNewCard() = runTest {
+        val rule = RuleSpec(id="pickup",sourceId="parcel",targetKey="status",steps=listOf(
+            RuleStep.AssertTarget("status"),RuleStep.ReadField("status","status","待取状态")))
+        val entry = com.life0423.carddock.core.model.PickupEntry.OUTBOUND
+        val definition = TemplateDefinition("pickup","取件","待取并亮码",TemplateKind.EXPRESS,"查快递并出示身份码",rule,pickupEntry=entry)
+        val compiler = object : RuleCompiler {
+            override suspend fun compile(prompt: String) = CompileResult.Unsupported("需要试查")
+        }
+        val device = object : DeviceGateway {
+            override suspend fun inspect(sourceId: String,targetKey: String) =
+                DeviceResponse.Ready(DeviceSnapshot(sourceId,targetKey,mapOf("status" to "暂无待取包裹")))
+        }
+        var runs = 0
+        val library = object : TemplateStore {
+            var disk = emptyList<PersonalTemplate>()
+            override suspend fun load() = disk
+            override suspend fun save(templates: List<PersonalTemplate>) { disk = templates }
+        }
+        val controller = PrototypeController(MemoryCardStore(emptyList()),compiler,RuleEngine(device),emptyList(),backgroundScope,
+            templateStore=library,verifyPickup={ runs++; if (runs == 1) "需要授权" else null },
+            discover={ _,_ -> DiscoveryResult.Found(DiscoveredTemplate(definition,mapOf("status" to "暂无待取包裹"))) })
+        controller.initialize()
+        with(controller.actions) {
+            openTemplateEditor(null)
+            changePrompt(definition.examplePrompt)
+            prepareTemplate(); runCurrent()
+            assertEquals(RunPhase.NEEDS_USER,controller.state.value.draft?.phase)
+            saveDraft(); runCurrent()
+            assertTrue(library.disk.isEmpty())
+            trialDraft(); runCurrent()
+            assertEquals(3,runs)
+            saveDraft(); runCurrent()
+            val published = library.disk.single().published!!
+            assertEquals(entry,published.pickupEntry)
+            openCreator(published); trialDraft(); runCurrent(); saveDraft(); runCurrent()
+            val card = controller.state.value.cards.single()
+            assertEquals(entry,card.pickupEntry)
+            assertEquals(4,runs)
+            refreshCard(card.id); runCurrent()
+            assertEquals(4,runs)
+        }
+    }
+
     @Test fun verifiedDefinitionAndCardHaveSeparateStorageAndVersion() = runTest {
         val rule = RuleSpec(id = "order", sourceId = "orders", targetKey = "completed", steps = listOf(
             RuleStep.AssertTarget("completed"), RuleStep.ReadField("status", "status", "状态"),

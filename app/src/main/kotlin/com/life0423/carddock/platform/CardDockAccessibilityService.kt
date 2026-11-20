@@ -1,5 +1,6 @@
 package com.life0423.carddock.platform
 
+import com.life0423.carddock.core.model.PickupEntry
 import android.content.Intent
 import android.os.Build
 import android.view.accessibility.AccessibilityWindowInfo
@@ -26,7 +27,7 @@ class CardDockAccessibilityService : AccessibilityService() {
 
     /** 单次观察结束即释放所有节点，密码节点仅记录存在性，不读取文本。 */
     @Suppress("DEPRECATION")
-    internal fun observe(displayId: Int? = null): CainiaoObservation? {
+    internal fun observe(displayId: Int? = null, pickup: Boolean = false): CainiaoObservation? {
         val root = (if (displayId == null) rootInActiveWindow else backgroundRoot(displayId, CAINIAO_PACKAGE)) ?: return null
         val packageName = root.packageName?.toString()
         if (packageName != CAINIAO_PACKAGE) {
@@ -34,6 +35,7 @@ class CardDockAccessibilityService : AccessibilityService() {
             return CainiaoObservation(packageName, emptySet(), false)
         }
         val labels = mutableSetOf<String>()
+        var hasPending = false
         var password = false
         fun visit(node: AccessibilityNodeInfo) {
             try {
@@ -42,7 +44,14 @@ class CardDockAccessibilityService : AccessibilityService() {
                     else listOfNotNull(node.text, node.contentDescription).forEach { value ->
                         val text = value.toString().trim()
                         // 仅留下核验锚点；手机号、验证码等实际正文不进入观察结果。
+                        if (pickup && listOf("申请授权","同意授权","身份码授权","已失效","已过期","加载失败","网络异常").any(text::contains))
+                            labels.add("待处理")
+                        val pending = !pickup && pickupCountText.matches(text)
                         when {
+                            pickup && PickupEntry.entries.any { it.label == text } -> labels.add(text)
+                            text == "我的" -> labels.add(text)
+                            pending -> hasPending = true
+                            pickup && text.startsWith("点击可") && text.endsWith("刷新") && text.length <= 12 -> labels.add("身份码刷新提示")
                             text in setOf("取包裹", "暂无待取包裹", "手机号登录", "登录/注册", "登录") -> labels.add(text)
                             text.contains("手机号") -> labels.add("手机号")
                             text.contains("验证码") -> labels.add("验证码")
@@ -56,7 +65,7 @@ class CardDockAccessibilityService : AccessibilityService() {
             }
         }
         visit(root)
-        return CainiaoObservation(packageName, labels, password)
+        return CainiaoObservation(packageName, labels, password, hasPending)
     }
 
     /** 只读取请求的活动窗口。系统浮窗和其他应用不会提供详情证据。 */
@@ -119,7 +128,7 @@ class CardDockAccessibilityService : AccessibilityService() {
 
     /** 在指定查询屏定位可见节点，优先点击控件，必要时向该屏分派手势。 */
     internal fun tapReadTarget(displayId: Int, expected: String, target: DetailNode, actionBounds: android.graphics.Rect? = null,
-        keepGestureOnLabel: Boolean = false, billDate: Boolean = false): Boolean {
+        keepGestureOnLabel: Boolean = false, receiptTarget: Boolean = false): Boolean {
         if (displayId <= 0 || Build.VERSION.SDK_INT < 30) return false
         val box = target.bounds ?: return false
         val root = backgroundRoot(displayId, expected) ?: return false
@@ -127,7 +136,7 @@ class CardDockAccessibilityService : AccessibilityService() {
         var point = box
         try {
             val hit = matches.singleOrNull { it.isVisibleToUser && android.graphics.Rect().also(it::getBoundsInScreen) == box }
-            if (hit == null && !billDate) return false
+            if (hit == null && !receiptTarget) return false
             var current: AccessibilityNodeInfo? = hit?.let { AccessibilityNodeInfo.obtain(it) }
             repeat(5) {
                 val n = current ?: return@repeat
@@ -142,8 +151,8 @@ class CardDockAccessibilityService : AccessibilityService() {
             }
             current?.recycle()
         } finally { matches.forEach { it.recycle() }; root.recycle() }
-        // 日期不在文本索引内、或控件点击失败时，均先重新确认前景交易行及其无遮挡的点击位置。
-        if (billDate && observeDetail(expected,displayId,geometry=true)?.exposesBillDate(target) != true) return false
+        // 补点账单日期或官方原单回链前，按当前页面重新核实标签归属与遮挡情况。
+        if (receiptTarget && observeDetail(expected,displayId,geometry=true)?.exposesReceiptTarget(target) != true) return false
         val path = android.graphics.Path().apply { moveTo(point.exactCenterX(),point.exactCenterY()) }
         val gesture = android.accessibilityservice.GestureDescription.Builder().setDisplayId(displayId)
             .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 70)).build()
@@ -168,6 +177,18 @@ class CardDockAccessibilityService : AccessibilityService() {
     @Suppress("DEPRECATION")
     internal fun clickBackgroundLabel(displayId: Int, expected: String, label: String): Boolean {
         val root = backgroundRoot(displayId, expected) ?: return false
+        return clickUniqueLabel(root, expected, label)
+    }
+
+    /** 前台仅接受已核验的取件入口，按钮点击走官方控件；来源切换后立即停止。 */
+    internal fun clickPickupEntry(entry: PickupEntry): Boolean {
+        val root = rootInActiveWindow ?: return false
+        return clickUniqueLabel(root, CAINIAO_PACKAGE, entry.label)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun clickUniqueLabel(root: AccessibilityNodeInfo, expected: String, label: String): Boolean {
+        if (root.packageName?.toString() != expected) { root.recycle(); return false }
         // 美团的点击范围限定为当前详情树中唯一「订单信息」分组。
         val area = if (expected == MEITUAN_PACKAGE) {
             val snapshot = readDetail(AccessibilityNodeInfo.obtain(root), expected)

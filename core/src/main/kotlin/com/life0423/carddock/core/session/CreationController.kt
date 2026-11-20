@@ -1,5 +1,6 @@
 package com.life0423.carddock.core.session
 
+import com.life0423.carddock.core.model.PickupEntry
 import com.life0423.carddock.core.engine.EngineResult
 import com.life0423.carddock.core.engine.RuleEngine
 import com.life0423.carddock.core.model.CardRecord
@@ -41,6 +42,7 @@ internal class CreationController(
     private val notify: (String) -> Unit,
     private val library: TemplateLibrary,
     private val discover: (suspend (String, Boolean) -> DiscoveryResult?)?,
+    private val verifyPickup: suspend (PickupEntry) -> String?,
 ) {
     private val mutableDraft = MutableStateFlow<CreationDraft?>(null)
     val draft = mutableDraft.asStateFlow()
@@ -173,6 +175,7 @@ internal class CreationController(
         val current = draft.value ?: return
         val shown = demonstration?.let { current.demonstrations.getOrNull(it) ?: return }
         if (work?.isActive == true || current.prompt.isBlank()) return
+        if (generate && current.template?.pickupEntry != null) return
         if (generate && !current.modelCandidate && current.template?.rule?.targetKey != "cainiao.pickup.empty") return
         val token = generation
         if (current.modelCandidate && !generate && current.template == null) return
@@ -205,7 +208,7 @@ internal class CreationController(
                         }
                         is DiscoveryResult.Demonstrate -> {
                             edit(token) { it.copy(phase = RunPhase.NEEDS_USER, demonstrations = found.choices,
-                                message = "页面中有多个数量。请按来源页面的显示顺序示范一次，点选要读取的字段。") }
+                                message = if (found.choices.any { c -> c.template.pickupEntry != null }) "请选择要示范的官方亮码入口。" else "页面中有多个数量。请按来源页面的显示顺序示范一次，点选要读取的字段。") }
                             return@launch
                         }
                         is DiscoveryResult.Incomplete -> compiled = CompileResult.Unsupported(found.reason)
@@ -242,6 +245,16 @@ internal class CreationController(
                             // 排队等锁期间可能已被关闭。拿到锁后再检查，避免把取消写成一次读取。
                             ensureActive()
                             edit(token) { it.copy(phase = RunPhase.RUNNING, message = "正在读取页面…") }
+                            compiled.template.pickupEntry?.let { entry ->
+                                edit(token) { it.copy(message = "正在从菜鸟首页独立核验亮码入口…") }
+                                repeat(if (current.personalTemplateId == null) 1 else 2) {
+                                    val missing = verifyPickup(entry)
+                                    if (missing != null) {
+                                        edit(token) { it.copy(phase = RunPhase.NEEDS_USER, message = missing) }
+                                        return@launch
+                                    }
+                                }
+                            }
                             val result = engine.execute(compiled.template.rule, ReadOptions(localTarget = target, requestedAt = discovery?.cutoff, compareFilter = compareFilter)) { progress ->
                                 edit(token) { it.copy(message = progress.message) }
                             }
@@ -310,7 +323,7 @@ internal class CreationController(
                     id = newId(), title = current.title.trim(), kind = template.kind,
                     rule = template.rule, snapshot = preview, run = run,
                     localTarget = if (template.requiresOrderNumber) LocalTarget(current.orderNumber, current.routeOid.ifBlank { null }) else null,
-                    sourceTemplateId = template.id, sourceTemplateRevision = template.revision, display = template.display,
+                    sourceTemplateId = template.id, sourceTemplateRevision = template.revision, display = template.display, pickupEntry = template.pickupEntry,
                 )
             if (cards.update { existing ->
                     if (original == null) existing + card

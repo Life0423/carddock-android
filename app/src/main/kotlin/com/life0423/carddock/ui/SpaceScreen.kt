@@ -162,6 +162,7 @@ internal fun SpaceScreen(
                                 }
                             }
                         }
+                        card.pickupEntry?.let { PickupCodeButton(it, enabled = !phase.isBusy() && sequence == null) }
                         if (phase.isBusy() && sequence == null) {
                             TextButton(onClick = { actions.cancelCard(card.id) }) { Text("取消") }
                         }
