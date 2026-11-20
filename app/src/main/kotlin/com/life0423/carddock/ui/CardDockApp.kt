@@ -1,12 +1,12 @@
 package com.life0423.carddock.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Star
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.sp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -51,6 +51,8 @@ internal fun CardDockApp(
         var tab by rememberSaveable { mutableStateOf("space") }
         var accountReturn by rememberSaveable { mutableStateOf<String?>(null) }
         val requestAccount: () -> Unit = { accountReturn = tab; tab = "profile" }
+        var publishPicker by rememberSaveable { mutableStateOf(false) }
+        var spaceMenu by remember { mutableStateOf(false) }
         var shopping by rememberSaveable { mutableStateOf(false) }
         var pickingTemplate by rememberSaveable { mutableStateOf(false) }
         var editorFromPicker by rememberSaveable { mutableStateOf(false) }
@@ -58,6 +60,10 @@ internal fun CardDockApp(
         var returnToSpaceAfterSave by rememberSaveable { mutableStateOf(false) }
         var detailId by rememberSaveable { mutableStateOf<String?>(null) }
         val shoppingState = rememberSaveableStateHolder()
+        // 旧取件卡的附加快捷方式指向一份具体的、已发布的本机模板。
+        val pickupTemplate = state.personalTemplates.mapNotNull { it.published }.filter {
+            it.pickupEntry != null && it.rule.sourceId == com.life0423.carddock.platform.CAINIAO_PACKAGE
+        }.singleOrNull()
         val detail = state.cards.firstOrNull { it.id == detailId }
         val pair = JdProduct.entries.mapNotNull { shoppingCard(state.cards, it)?.id }
         val shoppingAvailable = tools != null && (tools.shopping != null || pair.size == 2)
@@ -99,8 +105,6 @@ internal fun CardDockApp(
                         IconButton(onClick = { if (detail != null) detailId = null else shopping = false }) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回空间")
                         }
-                    } else if (tab == "space") {
-                        Image(painterResource(R.drawable.carddock_logo), null, Modifier.size(32.dp))
                     }
                     Text(
                         when (tab) {
@@ -114,17 +118,38 @@ internal fun CardDockApp(
                             }
                         },
                         modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.titleLarge,
+                        style = MaterialTheme.typography.headlineSmall, fontSize = 26.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     if (tab == "space" && detail == null && !shopping) {
+                        val ids = state.cards.filterNot { it.rule.sourceId.startsWith("demo.") }.map { it.id }
+                        if (ids.isNotEmpty() && state.sequence == null) Box {
+                            IconButton(onClick = { spaceMenu = true }) { Icon(DockIcons.MoreHoriz, "空间操作") }
+                            DropdownMenu(spaceMenu, { spaceMenu = false }) {
+                                DropdownMenuItem(text = { Text("顺序核验") }, onClick = {
+                                    spaceMenu = false
+                                    actions.refreshSequence(ids)
+                                })
+                            }
+                        }
                         FilledIconButton(
                             onClick = { pickingTemplate = true },
                             enabled = !state.loading && state.sequence == null,
                             modifier = Modifier.testTag("open_creator"),
                         ) { Icon(Icons.Rounded.Add, "添加功能卡") }
+                    } else if (tab == "templates") {
+                        FilledTonalButton({ actions.openTemplateEditor(null) }, Modifier.testTag("new_template"),
+                            enabled = state.sequence == null && !state.loading,
+                            colors = ButtonDefaults.filledTonalButtonColors(containerColor = DockColors.Mint,
+                                contentColor = MaterialTheme.colorScheme.onPrimary)) {
+                            Icon(Icons.Rounded.Add, null, Modifier.size(18.dp))
+                            Text("新建")
+                        }
+                    } else if (tab == "square" && square.available) {
+                        TextButton({ if (square.signedIn) publishPicker = true else requestAccount() },
+                            enabled = !square.busy) { Text("发布") }
                     }
                 }
             },
@@ -147,20 +172,21 @@ internal fun CardDockApp(
                         onUnfavorite = { squareStore?.toggleFavorite(it) },
                         onUse = actions.openCreator, onEdit = actions.openTemplateEditor, onDelete = actions.deleteTemplate,
                     )
-                    tab == "square" -> SquareScreen(squareStore, square, state.personalTemplates, requestAccount)
+                    tab == "square" -> SquareScreen(squareStore, square, state.personalTemplates, requestAccount, publishPicker) { publishPicker = false }
                     tab == "profile" -> ProfileScreen(
                         state.scenario, actions, openAccessibilitySettings, tools, saveModel, clearModel,
                         pageReaderConnected, mikaConnected, squareStore, square, accountReturn != null,
                         onAccountClosed = { accountReturn?.let { tab = it }; accountReturn = null },
                     )
-                    detail != null -> CardDetail(detail, state.cards, actions, state.sequence == null, saveMeituanRoute)
+                    detail != null -> CardDetail(detail, state.cards, actions, state.sequence == null, saveMeituanRoute, pickupTemplate)
                     shopping && tools != null -> shoppingState.SaveableStateProvider("shopping") {
                         ShoppingScreen(state.cards, state.sequence, tools, actions, saveShopping,
                             onOpenCard = { detailId = it })
                     }
                     else -> SpaceScreen(
                         state.cards, actions, state.sequence, onOpenCard = { detailId = it },
-                        shoppingSaved = tools?.shopping != null,
+                        savedShopping = tools?.shopping,
+                        pickupTemplate = pickupTemplate,
                         shoppingFavorite = tools?.shoppingFavorite == true,
                         onToggleShoppingFavorite = toggleShoppingFavorite,
                         onAdd = { pickingTemplate = true },
@@ -212,20 +238,20 @@ internal fun CardDockApp(
 private fun DockNavigation(selectedTab: String, onSelect: (String) -> Unit) {
     val labels = listOf("空间", "模板", "广场", "我的")
     val tags = listOf("space", "templates", "square", "profile")
-    val icons = listOf(DockIcons.Dashboard, DockIcons.GridView, Icons.Rounded.Star, DockIcons.PersonOutline)
+    val icons = listOf(R.drawable.nav_space, R.drawable.nav_templates, R.drawable.nav_square, R.drawable.nav_me)
     Column {
         HorizontalDivider(color = DockColors.Outline)
-        NavigationBar(containerColor = DockColors.Surface, tonalElevation = 0.dp) {
+        NavigationBar(containerColor = DockColors.Background, tonalElevation = 0.dp) {
             labels.forEachIndexed { index, label ->
                 NavigationBarItem(
                     selected = selectedTab == tags[index],
                     onClick = { onSelect(tags[index]) },
-                    icon = { Icon(icons[index], contentDescription = null) },
+                    icon = { Icon(painterResource(icons[index]), contentDescription = null) },
                     label = { Text(label) },
                     modifier = Modifier.testTag("tab_${tags[index]}"),
                     colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = DockColors.Mint,
-                        selectedIconColor = MaterialTheme.colorScheme.onPrimary,
+                        indicatorColor = Color.Transparent,
+                        selectedIconColor = DockColors.Mint,
                         selectedTextColor = DockColors.Mint,
                     ),
                 )

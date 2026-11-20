@@ -221,7 +221,10 @@ internal class SquareStore(context: Context, url: String, private val scope: Cor
             } catch (_: GeneralSecurityException) {
                 reportFailure("无法读取或保存本机登录凭据，请重新登录。")
             } catch (error: IOException) {
-                reportFailure(error.message ?: "连接广场失败，请重试。")
+                reportFailure(when (error) {
+                    is java.net.SocketException, is java.net.UnknownHostException, is java.net.SocketTimeoutException -> OFFLINE_MESSAGE
+                    else -> error.message ?: "广场请求失败，请重试。"
+                })
             } catch (_: SerializationException) {
                 reportFailure("广场返回了无效数据。")
             } finally {
@@ -257,6 +260,7 @@ internal class SquareStore(context: Context, url: String, private val scope: Cor
     }
 
     companion object {
+        const val OFFLINE_MESSAGE = "暂时无法连接广场"
         const val OFFLINE_LOGOUT = "已退出本机，服务端尚未确认撤销。"
     }
 

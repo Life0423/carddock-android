@@ -65,7 +65,7 @@ internal fun DockPrimaryAction(label: String, onClick: () -> Unit, modifier: Mod
 @Composable
 internal fun KindIcon(kind: TemplateKind, modifier: Modifier = Modifier) {
     Surface(
-        modifier = modifier.size(42.dp),
+        modifier = modifier.size(34.dp),
         color = kind.accent().copy(alpha = 0.12f),
         shape = RoundedCornerShape(13.dp),
     ) {
@@ -73,7 +73,7 @@ internal fun KindIcon(kind: TemplateKind, modifier: Modifier = Modifier) {
             imageVector = kind.icon(),
             contentDescription = null,
             tint = kind.accent(),
-            modifier = Modifier.padding(9.dp),
+            modifier = Modifier.padding(7.dp),
         )
     }
 }

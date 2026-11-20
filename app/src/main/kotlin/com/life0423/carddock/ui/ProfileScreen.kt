@@ -61,7 +61,7 @@ internal fun ProfileScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         if (store != null && account.available) item {
-            ProfileGroup("我的账号") {
+            ProfileGroup("") {
                 ProfileRow(account.account ?: "登录或注册", Icons.Rounded.Person,
                     if (account.signedIn) "账号管理" else null) {
                     dialog = if (account.signedIn) "账号管理" else "登录"
@@ -76,28 +76,29 @@ internal fun ProfileScreen(
         }
         item {
             ProfileGroup("手机能力") {
-                ProfileRow("页面读取服务", Icons.Rounded.Phone, if (pageReaderConnected) "已连接" else "未连接",
-                    statusConnected = pageReaderConnected)
-                HorizontalDivider(color = DockColors.Outline)
-                ProfileRow("无障碍设置", Icons.Rounded.Settings, modifier = Modifier.testTag("accessibility_settings"),
+                ProfileRow("页面读取", Icons.Rounded.Phone, if (pageReaderConnected) "已连接" else "待开启",
+                    modifier = Modifier.testTag("accessibility_settings"), statusConnected = pageReaderConnected,
                     onClick = openAccessibilitySettings)
                 HorizontalDivider(color = DockColors.Outline)
-                ProfileRow("Mika 后台助手", Icons.Rounded.Build, if (mikaConnected) "已连接" else "未连接",
+                ProfileRow("Mika 助手", Icons.Rounded.Build, if (mikaConnected) "已连接" else "待连接",
                     statusConnected = mikaConnected) { dialog = "Mika 后台助手" }
-            }
-        }
-        if (tools != null) item {
-            ProfileGroup("模型服务") {
-                ProfileRow("模型配置", DockIcons.AutoAwesomeMosaic, tools.model?.model ?: if (tools.modelBusy) "读取中" else "未配置") {
-                    dialog = "模型配置"
+                if (tools != null) {
+                    HorizontalDivider(color = DockColors.Outline)
+                    ProfileRow("模型配置", DockIcons.AutoAwesomeMosaic,
+                        if (tools.model != null) "已配置" else if (tools.modelBusy) "读取中" else "未配置",
+                        statusConnected = tools.model != null) { dialog = "模型配置" }
                 }
-                Text("用于生成菜鸟候选", Modifier.padding(start = 14.dp, bottom = 12.dp),
-                    color = DockColors.Muted, style = MaterialTheme.typography.bodySmall)
             }
         }
         item {
-            ProfileGroup("本地数据") {
+            ProfileGroup("数据与关于") {
                 ProfileRow("数据管理", DockIcons.Inventory2) { dialog = "数据管理" }
+                HorizontalDivider(color = DockColors.Outline)
+                ProfileRow("支持范围", DockIcons.GridView) { dialog = "支持范围" }
+                HorizontalDivider(color = DockColors.Outline)
+                ProfileRow("隐私与开源", Icons.Rounded.Lock) { dialog = "隐私与开源" }
+                HorizontalDivider(color = DockColors.Outline)
+                ProfileRow("关于卡坞", Icons.Rounded.Info) { dialog = "关于卡坞" }
                 HorizontalDivider(color = DockColors.Outline)
                 ProfileRow("开发与演示", Icons.Rounded.Build, if (showDemo) "收起" else null,
                     modifier = Modifier.testTag("toggle_demo")) { showDemo = !showDemo }
@@ -127,15 +128,7 @@ internal fun ProfileScreen(
                 }
             }
         }
-        item {
-            ProfileGroup("帮助与关于") {
-                ProfileRow("支持范围", DockIcons.GridView) { dialog = "支持范围" }
-                HorizontalDivider(color = DockColors.Outline)
-                ProfileRow("隐私与开源", Icons.Rounded.Lock) { dialog = "隐私与开源" }
-                HorizontalDivider(color = DockColors.Outline)
-                ProfileRow("关于卡坞", Icons.Rounded.Info, "原型版") { dialog = "关于卡坞" }
-            }
-        }
+
     }
 
     when (dialog) {
@@ -196,8 +189,8 @@ internal fun ProfileScreen(
             text = {
                 Text(when (dialog) {
                     "Mika 后台助手" -> "调试版通过 USB 启动内置助手。连接电脑，在工程根目录运行 tools/start-mika-helper.ps1。卡坞进程退出或手机重启后需要重新连接。"
-                    "支持范围" -> "支持菜鸟明确待取空状态、美团已完成订单和京东固定 A/B 商品。启用页面读取后，按核验提示切换到对应 App。"
-                    "隐私与开源" -> "第三方页面仅在主动核验时读取。订单号码和模型密钥保存在本机。模型仅收到固定菜鸟需求。卡坞采用 Apache 2.0 许可证。"
+                    "支持范围" -> "可查询待取包裹、最近外卖和京东商品，也可试运行自己的提醒与数量模板。可用字段以本机试运行结果为准。"
+                    "隐私与开源" -> "订单号码和模型密钥保存在本机。使用模型试查个人需求时，会向所配置的模型服务发送需求和必要的候选信息。卡坞采用 Apache 2.0 许可证。"
                     else -> "卡坞 CardDock · Android 原型"
                 })
             },
@@ -247,7 +240,7 @@ private fun AccountForm(store: SquareStore, state: SquareState, change: Boolean,
 @Composable
 private fun ProfileGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        if (title.isNotEmpty()) Text(title, color = DockColors.Muted, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Surface(color = DockColors.Surface, shape = RoundedCornerShape(16.dp),
             border = BorderStroke(1.dp, DockColors.Outline)) {
             Column(content = content)
@@ -268,7 +261,9 @@ private fun ProfileRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(icon, null, Modifier.size(24.dp), tint = DockColors.Muted)
+        if (icon == Icons.Rounded.Person) Surface(shape = androidx.compose.foundation.shape.CircleShape, color = DockColors.Mint) {
+            Icon(icon, null, Modifier.size(40.dp).padding(7.dp), tint = DockColors.Background)
+        } else Icon(icon, null, Modifier.size(22.dp), tint = DockColors.Muted)
         Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
         if (value != null) Text(value, color = if (statusConnected) DockColors.Mint else DockColors.Muted,
             style = MaterialTheme.typography.bodySmall)

@@ -21,7 +21,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 /** 只在用户点此按钮时打开来源应用。复用已验入口，不更新查询快照或核验时间。 */
 @Composable
-internal fun PickupCodeButton(entry: PickupEntry, enabled: Boolean) {
+internal fun PickupCodeButton(entry: PickupEntry, enabled: Boolean, onFinished: () -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var opening by remember { mutableStateOf(false) }
@@ -50,7 +50,22 @@ internal fun PickupCodeButton(entry: PickupEntry, enabled: Boolean) {
                 Toast.makeText(context,"菜鸟当前未允许从卡坞打开首页，请在菜鸟查看身份码。",Toast.LENGTH_LONG).show()
             } catch (_: ActivityNotFoundException) {
                 Toast.makeText(context,"系统未找到菜鸟入口",Toast.LENGTH_SHORT).show()
-            } finally { opening = false }
+            } finally { opening = false; onFinished() }
         }
-    }) { Text(if (opening) "正在打开…" else "出示身份码") }
+    }) { Text(if (opening) "正在打开…" else "出示取件码") }
+}
+
+/** 旧卡未绑定亮码动作。让用户明确选择从哪份已核验模板打开官方身份码。 */
+@Composable
+internal fun PickupTemplateShortcut(template: com.life0423.carddock.core.model.TemplateDefinition, enabled: Boolean) {
+    val entry = template.pickupEntry ?: return
+    var selecting by remember(template.id, template.revision) { mutableStateOf(false) }
+    OutlinedButton({ selecting = true }, enabled = enabled) { Text("出示取件码") }
+    if (selecting) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { selecting = false },
+        title = { Text("使用「${template.title}」亮码") },
+        text = { Text("通过这份已核验的个人模板，打开菜鸟官方取件身份码。") },
+        confirmButton = { PickupCodeButton(entry, enabled) { selecting = false } },
+        dismissButton = { androidx.compose.material3.TextButton({ selecting = false }) { Text("取消") } },
+    )
 }

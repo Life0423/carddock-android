@@ -2,6 +2,14 @@ package com.life0423.carddock.ui
 
 import com.life0423.carddock.core.model.displayFields
 
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.life0423.carddock.R
+import com.life0423.carddock.core.model.TemplateDefinition
+import com.life0423.carddock.data.ShoppingTask
+import com.life0423.carddock.platform.CAINIAO_PACKAGE
+import com.life0423.carddock.platform.JdProduct
+import com.life0423.carddock.shoppingCard
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -38,34 +46,20 @@ import com.life0423.carddock.ui.theme.DockColors
 @Composable
 internal fun SpaceScreen(
     cards: List<CardRecord>, actions: PrototypeActions, sequence: SequenceStatus?,
-    onOpenCard: (String) -> Unit, shoppingSaved: Boolean, shoppingFavorite: Boolean,
+    onOpenCard: (String) -> Unit, savedShopping: ShoppingTask?, pickupTemplate: TemplateDefinition?, shoppingFavorite: Boolean,
     onToggleShoppingFavorite: () -> Unit, onOpenShopping: (() -> Unit)?, onAdd: () -> Unit,
 ) {
     val nativeIds = cards.filterNot { it.rule.sourceId.startsWith("demo.") }.map { it.id }
     val ordered: List<CardRecord?> = cards.sortedByDescending { it.favorite }.toMutableList<CardRecord?>().apply {
         if (onOpenShopping != null) add(if (shoppingFavorite) cards.count { it.favorite } else size, null)
     }
-    var menu by remember { mutableStateOf(false) }
+    val featuredId = cards.firstOrNull { it.favorite && it.rule.sourceId == CAINIAO_PACKAGE && it.kind == TemplateKind.EXPRESS }?.id
     LazyColumn(
         modifier = Modifier.testTag("space_list"),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         if (sequence != null) item { SequenceControls(sequence, actions, nativeIds) }
-        item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("点卡片即可查询", Modifier.weight(1f), color = DockColors.Muted)
-                if (sequence == null && nativeIds.isNotEmpty()) Box {
-                    IconButton(onClick = { menu = true }) { Icon(DockIcons.MoreHoriz, "空间操作") }
-                    DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("顺序核验") }, onClick = {
-                            menu = false
-                            actions.refreshSequence(nativeIds)
-                        })
-                    }
-                }
-            }
-        }
         if (cards.isEmpty() && onOpenShopping == null) item {
             Surface(color = DockColors.Surface, shape = RoundedCornerShape(16.dp)) {
                 Column(
@@ -79,7 +73,7 @@ internal fun SpaceScreen(
         }
         items(ordered, key = { it?.id ?: "shopping" }) { card ->
             if (card == null) {
-                ShoppingSummary(shoppingSaved, shoppingFavorite, onToggleShoppingFavorite, checkNotNull(onOpenShopping))
+                ShoppingSummary(cards, savedShopping, shoppingFavorite, onToggleShoppingFavorite, checkNotNull(onOpenShopping))
                 return@items
             }
             val demo = card.rule.sourceId.startsWith("demo.")
@@ -91,87 +85,85 @@ internal fun SpaceScreen(
                 fields.firstOrNull { it.key == "variant" }?.value
             } else fields.firstOrNull()?.value
             val previous = snapshot != null && phase != RunPhase.SUCCEEDED && phase != RunPhase.IDLE
+            val featured = featuredId == card.id
             var cardMenu by remember { mutableStateOf(false) }
             Surface(
                 onClick = { actions.refreshCard(card.id) },
                 enabled = !phase.isBusy() && sequence == null,
                 modifier = Modifier.fillMaxWidth().testTag("refresh_${card.id}"),
-                color = DockColors.Surface,
+                color = if (featured) DockColors.Raised else DockColors.Surface,
                 shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, if (phase.isBusy()) DockColors.Mint else DockColors.Outline),
             ) {
-                Row(
-                    Modifier.padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    KindIcon(card.kind)
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(if (demo) "${card.title} · 演示" else card.title,
-                            style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                        if (phase == RunPhase.NEEDS_USER && card.run?.message == com.life0423.carddock.platform.FILTER_APPEARANCE_REQUIRED) {
-                            TextButton(onClick = { actions.compareFilterForCard(card.id) }, enabled = sequence == null) {
-                                Text("允许本次在本机比对筛选项")
+                Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        KindIcon(card.kind)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (demo) "${card.title} · 演示" else card.title, Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        FavoriteButton(card.title, card.favorite) { actions.toggleFavorite(card.id) }
+                        Box {
+                            IconButton(onClick = { cardMenu = true }, modifier = Modifier.testTag("space_menu_${card.id}")) {
+                                Icon(DockIcons.MoreHoriz, "${card.title}的更多操作")
+                            }
+                            DropdownMenu(cardMenu, { cardMenu = false }) {
+                                DropdownMenuItem(text = { Text("查看详情") }, modifier = Modifier.testTag("open_card_${card.id}"),
+                                    onClick = { cardMenu = false; onOpenCard(card.id) })
                             }
                         }
-                        Text(summary ?: "暂无核验结果", style = MaterialTheme.typography.bodySmall,
-                            maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        if (price != null) {
-                            Text(
-                                if (price.currency == "CNY") "¥${price.amount} · App 展示价"
-                                else "${price.amount} ${price.currency} · App 展示价",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Text(
-                                (if (card.priceVerificationFailed) "上次有效价格 " else "价格核验 ") +
-                                    formatTimestamp(price.verifiedAt),
-                                color = if (card.priceVerificationFailed) DockColors.Amber else DockColors.Muted,
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        }
-                        if (previous || phase != RunPhase.SUCCEEDED || price == null) {
-                            val shown = when {
-                                previous -> "${phase.label()} · 保留上次结果"
-                                phase == RunPhase.SUCCEEDED && snapshot != null -> "核验 " + formatTimestamp(snapshot.fetchedAt)
-                                phase == RunPhase.RUNNING -> "正在查询"
-                                else -> phase.label()
-                            }
-                            Text(shown + if (previous) " · " + formatTimestamp(snapshot.fetchedAt) else "",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (previous || phase == RunPhase.NEEDS_USER) DockColors.Amber else DockColors.Muted)
-                        }
-                        if (phase != RunPhase.SUCCEEDED) card.run?.message?.takeIf { it.isNotBlank() }?.let {
-                            Text(it, color = DockColors.Muted, style = MaterialTheme.typography.labelSmall)
-                        }
-                        if (phase == RunPhase.RUNNING) LinearProgressIndicator(Modifier.fillMaxWidth())
                     }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Row {
-                            FavoriteButton(card.title, card.favorite) { actions.toggleFavorite(card.id) }
-                            Box {
-                                IconButton(onClick = { cardMenu = true }, modifier = Modifier.testTag("space_menu_${card.id}")) {
-                                    Icon(DockIcons.MoreHoriz, "${card.title}的更多操作")
-                                }
-                                DropdownMenu(cardMenu, onDismissRequest = { cardMenu = false }) {
-                                    DropdownMenuItem(
-                                        text = { Text("查看详情") },
-                                        modifier = Modifier.testTag("open_card_${card.id}"),
-                                        onClick = { cardMenu = false; onOpenCard(card.id) },
-                                    )
-                                }
-                            }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(summary ?: "暂无核验结果", Modifier.weight(1f),
+                            style = if (featured) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        if (featured) Image(painterResource(R.drawable.pickup_parcels), null, Modifier.size(86.dp, 56.dp))
+                    }
+                    if (phase == RunPhase.NEEDS_USER && card.run?.message == com.life0423.carddock.platform.FILTER_APPEARANCE_REQUIRED) {
+                        TextButton(onClick = { actions.compareFilterForCard(card.id) }, enabled = sequence == null) {
+                            Text("允许本次在本机比对筛选项")
                         }
-                        card.pickupEntry?.let { PickupCodeButton(it, enabled = !phase.isBusy() && sequence == null) }
-                        if (phase.isBusy() && sequence == null) {
-                            TextButton(onClick = { actions.cancelCard(card.id) }) { Text("取消") }
+                    }
+                    if (price != null) {
+                        Text(
+                            if (price.currency == "CNY") "¥${price.amount} · App 展示价"
+                            else "${price.amount} ${price.currency} · App 展示价",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            (if (card.priceVerificationFailed) "上次有效价格 " else "价格核验 ") +
+                                formatTimestamp(price.verifiedAt),
+                            color = if (card.priceVerificationFailed) DockColors.Amber else DockColors.Muted,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val shown = when {
+                            snapshot != null -> (if (previous) "上次核验 " else "核验 ") + formatTimestamp(snapshot.fetchedAt)
+                            else -> phase.label()
                         }
+                        Text(shown, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = DockColors.Muted)
+                        if (card.pickupEntry != null) PickupCodeButton(card.pickupEntry!!, enabled = !phase.isBusy() && sequence == null)
+                        else if (featured && card.offersPickupShortcut() && pickupTemplate != null)
+                            PickupTemplateShortcut(pickupTemplate, enabled = !phase.isBusy() && sequence == null)
+                    }
+                    if (previous) Text(phase.label(), color = DockColors.Amber, style = MaterialTheme.typography.labelMedium)
+                    if (phase != RunPhase.SUCCEEDED) card.run?.message?.takeIf { it.isNotBlank() }?.let {
+                        Text(it, color = DockColors.Muted, style = MaterialTheme.typography.labelSmall)
+                    }
+                    if (phase == RunPhase.RUNNING) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    if (phase.isBusy() && sequence == null) {
+                        TextButton(onClick = { actions.cancelCard(card.id) }) { Text("取消") }
                     }
                 }
             }
         }
     }
 }
+
+/** 只有已接入的菜鸟取件查询展示个人亮码模板快捷方式；普通数量模板没有该动作。 */
+private fun CardRecord.offersPickupShortcut() = rule.sourceId == CAINIAO_PACKAGE &&
+    rule.targetKey in setOf("cainiao.pickup.empty", "cainiao.pickup.status")
 
 /** 星标是独立操作，不触发卡片查询。 */
 @Composable
@@ -184,18 +176,35 @@ private fun FavoriteButton(title: String, favorite: Boolean, onToggle: () -> Uni
 
 /** 选购入口引用原任务，点击后打开对比并按已核验的商品身份刷新。 */
 @Composable
-private fun ShoppingSummary(saved: Boolean, favorite: Boolean, onToggle: () -> Unit, onOpen: () -> Unit) {
+private fun ShoppingSummary(cards: List<CardRecord>, saved: ShoppingTask?, favorite: Boolean, onToggle: () -> Unit, onOpen: () -> Unit) {
     Surface(onClick = onOpen, modifier = Modifier.fillMaxWidth().testTag("open_shopping"), color = DockColors.Surface,
         shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, DockColors.Outline)) {
-        Row(Modifier.padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            KindIcon(TemplateKind.SHOPPING)
-            Column(Modifier.weight(1f)) {
-                Text("显示器选购", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                Text(if (saved) "京东 A / B · 已保存对比" else "京东 A / B · 商品对比",
-                    color = DockColors.Muted, style = MaterialTheme.typography.bodySmall)
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                KindIcon(TemplateKind.SHOPPING)
+                Text("显示器选购", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                FavoriteButton("显示器选购", favorite, onToggle)
             }
-            FavoriteButton("显示器选购", favorite, onToggle)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                JdProduct.entries.forEach { product ->
+                    val card = shoppingCard(cards, product)
+                    val baseline = if (product == JdProduct.A) saved?.a else saved?.b
+                    val price = if (card != null) card.appPrice else baseline?.price
+                    val stale = card == null || card.priceVerificationFailed || card.run?.phase != RunPhase.SUCCEEDED
+                    Surface(Modifier.weight(1f), color = DockColors.Background, shape = RoundedCornerShape(10.dp)) {
+                        Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) {
+                            Text("京东 ${product.name}" + if (price != null && stale) " · 上次核验" else "",
+                                color = DockColors.Muted, style = MaterialTheme.typography.bodySmall)
+                            Text(price?.let { if (it.currency == "CNY") "¥${it.amount}" else "${it.amount} ${it.currency}" } ?: "待采价",
+                                fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
+                            if (stale && price != null) Text(formatTimestamp(price.verifiedAt),
+                                color = DockColors.Muted, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+            Text("查看对比 ›", Modifier.align(Alignment.End).padding(top = 4.dp), color = DockColors.Mint,
+                style = MaterialTheme.typography.labelMedium)
         }
     }
 }
@@ -204,7 +213,7 @@ private fun ShoppingSummary(saved: Boolean, favorite: Boolean, onToggle: () -> U
 @Composable
 internal fun CardDetail(
     card: CardRecord, cards: List<CardRecord>, actions: PrototypeActions, canStart: Boolean,
-    saveMeituanRoute: (String, String?) -> Boolean,
+    saveMeituanRoute: (String, String?) -> Boolean, pickupTemplate: TemplateDefinition? = null,
 ) {
     var configureRoute by remember(card.id) { mutableStateOf(false) }
     LazyColumn(contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)) {
@@ -229,6 +238,9 @@ internal fun CardDetail(
                     { actions.changeCardRule(card.id, true) }
                 },
             )
+        }
+        if (card.pickupEntry == null && card.offersPickupShortcut() && pickupTemplate != null) item {
+            PickupTemplateShortcut(pickupTemplate, enabled = canStart && card.run?.phase?.isBusy() != true)
         }
         if (card.rule.sourceId == MEITUAN_PACKAGE && card.localTarget != null) item {
             TextButton(onClick = { configureRoute = true }, enabled = canStart && card.run?.phase?.isBusy() != true) {
