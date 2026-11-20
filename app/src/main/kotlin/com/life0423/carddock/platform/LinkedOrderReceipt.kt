@@ -40,6 +40,7 @@ internal class LinkedOrderReceipt(private val target: OrderObservation, private 
         var amount: Long? = null
         var inBills = false
         var openedCandidate = false
+        var openedFullLedger = false
         var pages = 0
         val used = mutableSetOf<String>()
         while (connected()) {
@@ -90,6 +91,11 @@ internal class LinkedOrderReceipt(private val target: OrderObservation, private 
                 val ledgerScreen = labels.any { it in setOf("全部账单","账单明细","账单") } ||
                     "收支统计" in labels && "支出" in labels && "收入" in labels
                 if (!ledgerScreen) continue
+                // 摘要的三条交易和完整流水是两个页面。点入口后等到流水页标记出现再读取日期。
+                if (openedFullLedger && ("筛选" !in labels || "查看全部账单" in labels)) {
+                    stage = "等待完整账单列表"
+                    continue
+                }
                 val rows = live.filter { date.matches(it.label) && it.label.substringBefore(' ').endsWith(day) }
                     .distinctBy { it.bounds }
                 stage = "核对同日交易（候选 ${rows.size}，第 ${pages + 1} 屏）"
@@ -98,6 +104,14 @@ internal class LinkedOrderReceipt(private val target: OrderObservation, private 
                     stage = "打开已定位的同日交易"
                     if (!tapReceipt(rows.single())) return@withTimeoutOrNull null
                     openedCandidate = true
+                    continue
+                }
+                val allBills = window.uniqueOrderNode(live.filter { it.label == "查看全部账单" })
+                if (!openedFullLedger && allBills != null) {
+                    stage = "从交易摘要打开完整账单"
+                    if (!tapReceipt(allBills)) return@withTimeoutOrNull null
+                    openedFullLedger = true
+                    pages = 0
                     continue
                 }
                 val pane = live.filter { it.scrollable && it.canGoForward }.maxByOrNull { it.bounds!!.height() }

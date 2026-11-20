@@ -143,8 +143,14 @@ internal fun DetailWindow.uniqueOrderNode(candidates: List<DetailNode>): DetailN
     return foregroundOrderNode(candidates)
 }
 
+/** 同一宽度的两个 Web 列表可能在底边取整时差 1 像素；只在前景正好贴到页面底边时接受。 */
+private fun Rect.coversOrderViewport(front: Rect, back: Rect): Boolean =
+    contains(front) && (contains(back) || front.left == left && back.left == left &&
+        front.right == right && back.right == right && back.top >= top &&
+        front.bottom == bottom && back.bottom == bottom + 1)
+
 /** 比较候选所在分支的绘制顺序。用覆盖背景的页面容器判断，不要求两个列表的视口等高。 */
-internal fun DetailWindow.foregroundOrderNode(candidates: List<DetailNode>): DetailNode? {
+internal fun DetailWindow.foregroundOrderNode(candidates: List<DetailNode>, listViewports: Boolean = false): DetailNode? {
     if (candidates.size <= 1) return candidates.singleOrNull()
     val paths = candidates.map { orderPath(it) }
     return candidates.indices.singleOrNull { front ->
@@ -157,7 +163,8 @@ internal fun DetailWindow.foregroundOrderNode(candidates: List<DetailNode>): Det
                 val lower = nodes[backPath[split]]
                 val area = upper.bounds
                 lower.drawingOrder > 0 && upper.drawingOrder > lower.drawingOrder && area != null &&
-                    area.contains(candidates[front].bounds!!) && area.contains(candidates[back].bounds!!)
+                    (if (listViewports) area.coversOrderViewport(candidates[front].bounds!!,candidates[back].bounds!!)
+                     else area.contains(candidates[front].bounds!!) && area.contains(candidates[back].bounds!!))
             }
         }
     }?.let(candidates::get)
@@ -181,7 +188,7 @@ internal fun DetailWindow.ownsResultToolbar(
     val toolbar = bar.bounds ?: return false
     val area = body.bounds ?: return false
     return prior.drawingOrder > 0 && body.drawingOrder == prior.drawingOrder + 1 &&
-        bar.drawingOrder == body.drawingOrder + 1 && area.contains(previous) && area.contains(view) &&
+        bar.drawingOrder == body.drawingOrder + 1 && area.coversOrderViewport(view,previous) &&
         area.top == toolbar.top && toolbar.left == view.left && toolbar.right == view.right &&
         toolbar.contains(control.bounds!!) && view.top - toolbar.bottom in 0..control.bounds.height() &&
         view != previous
@@ -418,7 +425,7 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
 
     /** 重叠全屏页面以最近公共祖先处各分支的绘制次序裁决，无法确定覆盖关系时停止。 */
     private fun activeOrderPage(window: DetailWindow, pages: List<WindowPage>, previous: Rect?): WindowPage? {
-        val front = window.foregroundOrderNode(pages.map { it.view }) ?: return null
+        val front = window.foregroundOrderNode(pages.map { it.view }, listViewports = true) ?: return null
         val page = pages.single { it.view === front }
         val frontBox = checkNotNull(front.bounds)
         var ancestor = window.nodes.indexOfFirst { it === front }

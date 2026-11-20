@@ -30,6 +30,24 @@ class OrderEvidenceTest {
         assertNull(window(Rect(0,110,600,1000),3).foregroundOrderNode(listOf(old,active)))
     }
 
+    @Test fun fullWidthListAllowsOnlyOnePixelOfBottomRounding() {
+        val root = DetailNode(-1,null,null,"",true,Rect(0,0,1080,2700))
+        val region = root.copy(parent=0,bounds=Rect(0,0,927,2313),drawingOrder=7)
+        val active = root.copy(parent=2,bounds=Rect(0,237,927,2313))
+        val bar = root.copy(parent=0,bounds=Rect(0,0,927,228),drawingOrder=8)
+        val title = field("订单列表",170).copy(parent=4)
+        fun accepts(bottom: Int, right: Int = 927): Pair<Boolean,Boolean> {
+            val old = root.copy(parent=0,bounds=Rect(0,363,right,bottom),drawingOrder=6)
+            val w = DetailWindow("sample",listOf(root,old,region,active,bar,title),false)
+            val lists = listOf(old,active)
+            assertNull(w.foregroundOrderNode(lists))
+            return (w.foregroundOrderNode(lists, listViewports = true) === active) to w.ownsResultToolbar(title,active,lists,old.bounds)
+        }
+        assertEquals(true to true,accepts(2314))
+        assertEquals(false to false,accepts(2315))
+        assertEquals(false to false,accepts(2314,928))
+    }
+
     @Test fun stickyToolbarBindsOnlyAboveNewResultAndKnownOriginalList() {
         val root = DetailNode(-1,null,null,"",true,Rect(0,0,400,800))
         val old = root.copy(parent=0,bounds=Rect(0,170,400,800),drawingOrder=3)
@@ -117,6 +135,35 @@ class OrderEvidenceTest {
         assertTrue(DetailWindow("sample",listOf(root,paid,link),false).exposesReceiptTarget(link))
         assertFalse(DetailWindow("sample",listOf(root,link),false).exposesReceiptTarget(link))
         assertFalse(DetailWindow("sample",listOf(root,paid,link,root.copy(parent=0,drawingOrder=3)),false).exposesReceiptTarget(link))
+    }
+
+    @Test fun missingDateInSummaryOpensFullLedgerBeforeUsingReceipt() = runTest {
+        val order = OrderObservation("1000001", LocalDateTime.parse("2026-10-22T12:34:56"), true, true, null)
+        val pages = listOf(
+            listOf("我的账单"),
+            listOf("账单","10-29 12:35","查看全部账单"),
+            listOf("账单","查看全部账单","10-22 12:35"),
+            listOf("账单","筛选","10-22 12:35"),
+            listOf("-22.90","支付成功","查看原订单"),
+            listOf("订单已完成","订单号：1000001","下单时间：2026-10-22 12:34:56")
+        )
+        val root = DetailNode(-1,null,null,"",true,Rect(0,0,300,600))
+        var screen = 0
+        var lastObserved = -1
+        val taps = mutableListOf<String>()
+        val paid = LinkedOrderReceipt(order,2290).read({ true }, {
+            val index = screen
+            lastObserved = index
+            if (screen == 2) screen++ // 模拟跳转后旧摘要短暂滞留。
+            DetailWindow("sample",listOf(root) + pages[index].mapIndexed { i,s -> field(s,40*i).copy(parent=0) },false)
+        }, tap = {
+            if (it.label == "10-22 12:35") assertEquals(3,lastObserved)
+            taps += it.label
+            screen++
+            true
+        }, scroll = { error("已有完整流水入口") })
+        assertEquals(2290L,paid)
+        assertEquals(listOf("我的账单","查看全部账单","10-22 12:35","查看原订单"),taps)
     }
 
     @Test fun paidReceiptMustLinkToSameOrderAndSecond() = runTest {
