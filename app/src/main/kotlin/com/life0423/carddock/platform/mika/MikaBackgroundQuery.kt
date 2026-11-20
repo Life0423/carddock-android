@@ -1,6 +1,7 @@
 package com.life0423.carddock.platform.mika
 
 import com.life0423.carddock.core.rule.CountRoute
+import com.life0423.carddock.platform.orderActionBounds
 import com.life0423.carddock.platform.CountField
 import com.life0423.carddock.platform.readVisibleCount
 import com.life0423.carddock.core.rule.ReminderRoute
@@ -89,13 +90,21 @@ internal class MikaBackgroundQuery(private val context: Context, private val foc
     suspend fun monthlyOrders(source: String, scan: com.life0423.carddock.platform.OrderCollection,
         choose: ((List<String>) -> String?)? = null): DeviceResponse {
         do {
-            val result = query("订单来源", { helper, surface, w, h, dpi -> helper.openLauncher(surface,w,h,dpi,source) }, tall = true) {
-                reader, id, connected, frame -> scan.runWindow(connected,
-                    observe = { reader.clearCache(); reader.observeDetail(source,id,geometry=true) },
-                    tap = { connected() && reader.tapReadTarget(id,source,it,it.bounds) },
+            val result = query("订单来源", { helper, surface, w, h, dpi -> helper.openIndependentLauncher(surface,w,h,dpi,source) }, tall = true) {
+                reader, id, connected, frame ->
+                var lastWindow: com.life0423.carddock.platform.DetailWindow? = null
+                scan.runWindow(connected,
+                    observe = {
+                        reader.clearCache()
+                        reader.observeDetail(source,id,geometry=true).also { lastWindow = it }
+                    },
+                    tap = { node -> connected() && reader.tapReadTarget(id,source,node,
+                        lastWindow?.orderActionBounds(node) ?: node.bounds, keepGestureOnLabel = true) },
                     scroll = { connected() && it.bounds?.let { box -> reader.advanceCollection(id,source,box) } == true }, choose,
                     sample = if (scan.compareFilter) frame::buttonColors else null,
-                    panelVisible = { frame.enablePanel(scan.compareFilter && it) })
+                    panelVisible = { frame.enablePanel(scan.compareFilter && it) },
+                    tapBillDate = { node -> connected() && reader.tapReadTarget(id,source,node,
+                        lastWindow?.orderActionBounds(node) ?: node.bounds, keepGestureOnLabel = true, billDate = true) })
             }
             if (!scan.anotherWindow || result !is DeviceResponse.NeedsUser) return result
         } while (true)

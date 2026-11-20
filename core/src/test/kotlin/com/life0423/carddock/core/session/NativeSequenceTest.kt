@@ -27,6 +27,37 @@ import org.junit.Test
 /** 顺序核验、展示价独立保存以及模型候选刷新走同一个生产控制器。 */
 @OptIn(ExperimentalCoroutinesApi::class)
 class NativeSequenceTest {
+    @Test fun appearancePermissionIsLimitedToTheRequestedRefresh() = runTest {
+        val rule = RuleSpec(id = "order", sourceId = "source", targetKey = "monthly-original-paid", steps = listOf(
+            RuleStep.AssertTarget("monthly-original-paid"), RuleStep.ReadField("status", "status", "状态"),
+        ))
+        val template = TemplateDefinition("order", "订单", "", TemplateKind.DELIVERY, "订单", rule)
+        val store = MemoryCardStore(listOf(CardRecord("order", "订单", TemplateKind.DELIVERY, rule)))
+        val permissions = mutableListOf<Boolean>()
+        val gateway = object : DeviceGateway {
+            override suspend fun inspect(sourceId: String, targetKey: String) = error("缺少本次读取选项")
+            override suspend fun inspect(sourceId: String, targetKey: String, options: ReadOptions): DeviceResponse {
+                permissions += options.compareFilter
+                return if (options.compareFilter) DeviceResponse.Ready(DeviceSnapshot(sourceId,targetKey,mapOf("status" to "ok")))
+                    else DeviceResponse.NeedsUser("缺少本次同意")
+            }
+        }
+        val controller = PrototypeController(store, FixedCompiler(template), RuleEngine(gateway),
+            listOf(template), backgroundScope)
+        controller.initialize()
+        runCurrent()
+        controller.actions.refreshCard("order")
+        runCurrent()
+        controller.actions.compareFilterForCard("order")
+        runCurrent()
+        val verified = store.disk!!.single().snapshot
+        assertNotNull(verified)
+        controller.actions.refreshCard("order")
+        runCurrent()
+        assertEquals(listOf(false,true,false), permissions)
+        assertEquals(verified, store.disk!!.single().snapshot)
+    }
+
     @Test fun ruleReplacementAndRollbackRequireSuccessfulTrialAndPreserveCard() = runTest {
         val baseline = RuleSpec(id = "baseline", sourceId = "source", targetKey = "target", steps = listOf(
             RuleStep.AssertTarget("target"), RuleStep.ReadField("status", "status", "状态"),

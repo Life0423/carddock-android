@@ -118,28 +118,32 @@ class CardDockAccessibilityService : AccessibilityService() {
     }
 
     /** 在指定查询屏定位可见节点，优先点击控件，必要时向该屏分派手势。 */
-    internal fun tapReadTarget(displayId: Int, expected: String, target: DetailNode, actionBounds: android.graphics.Rect? = null): Boolean {
+    internal fun tapReadTarget(displayId: Int, expected: String, target: DetailNode, actionBounds: android.graphics.Rect? = null,
+        keepGestureOnLabel: Boolean = false, billDate: Boolean = false): Boolean {
         if (displayId <= 0 || Build.VERSION.SDK_INT < 30) return false
         val box = target.bounds ?: return false
         val root = backgroundRoot(displayId, expected) ?: return false
         val matches = root.findAccessibilityNodeInfosByText(target.label)
         var point = box
         try {
-            val hit = matches.singleOrNull { it.isVisibleToUser && android.graphics.Rect().also(it::getBoundsInScreen) == box } ?: return false
-            var current: AccessibilityNodeInfo? = AccessibilityNodeInfo.obtain(hit)
+            val hit = matches.singleOrNull { it.isVisibleToUser && android.graphics.Rect().also(it::getBoundsInScreen) == box }
+            if (hit == null && !billDate) return false
+            var current: AccessibilityNodeInfo? = hit?.let { AccessibilityNodeInfo.obtain(it) }
             repeat(5) {
                 val n = current ?: return@repeat
                 val bounds = android.graphics.Rect().also(n::getBoundsInScreen)
                 val allowed = actionBounds?.contains(bounds) ?: (bounds.width() <= box.width()*6 && bounds.height() <= box.height()*6)
-                    if (allowed && !target.label.startsWith("下单时间") && n.isClickable) {
+                if (allowed && !target.label.startsWith("下单时间") && n.isClickable) {
                     val ok = n.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                     n.recycle(); current=null
                     if (ok) return true
-                    point=bounds
+                    if (!keepGestureOnLabel) point=bounds
                 } else { current=n.parent; n.recycle() }
             }
             current?.recycle()
         } finally { matches.forEach { it.recycle() }; root.recycle() }
+        // 日期不在文本索引内、或控件点击失败时，均先重新确认前景交易行及其无遮挡的点击位置。
+        if (billDate && observeDetail(expected,displayId,geometry=true)?.exposesBillDate(target) != true) return false
         val path = android.graphics.Path().apply { moveTo(point.exactCenterX(),point.exactCenterY()) }
         val gesture = android.accessibilityservice.GestureDescription.Builder().setDisplayId(displayId)
             .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 70)).build()

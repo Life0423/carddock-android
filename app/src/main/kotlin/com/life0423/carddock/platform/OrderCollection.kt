@@ -1,5 +1,6 @@
 package com.life0423.carddock.platform
 
+import android.graphics.Rect
 import com.life0423.carddock.core.engine.MonthlyOrderLedger
 import com.life0423.carddock.core.engine.OrderObservation
 import com.life0423.carddock.core.port.DeviceResponse
@@ -68,6 +69,124 @@ internal fun Collection<String>.orderTimes() = mapNotNull { field ->
 private data class WindowPage(val view: DetailNode, val markers: List<DetailNode>, val end: Boolean,
     val rowNumbers: List<Int?>, val reportedCounts: List<Int>)
 
+/** 原生按钮常把文字放在子控件；仅当可点击祖先只含同一标签时，才将它作为点击目标。 */
+internal fun DetailWindow.orderActionBounds(target: DetailNode): Rect? {
+    val index = nodes.indexOfFirst { it === target }
+    if (index < 0) return target.bounds
+    val targetChain = mutableSetOf(index)
+    var parent = target.parent
+    while (parent >= 0) {
+        val owner = nodes[parent]
+        if (owner.clickable && owner.visible && owner.bounds?.contains(target.bounds!!) == true) {
+            val subtree = mutableSetOf(parent)
+            for (i in parent + 1 until nodes.size) {
+                val child = nodes[i]
+                if (child.parent !in subtree) break
+                subtree += i
+                if (child.visible && (child.clickable && i !in targetChain || child.label.isNotBlank() && child.label != target.label)) return target.bounds
+            }
+            return owner.bounds.takeIf { owner.label.isBlank() || owner.label == target.label } ?: target.bounds
+        }
+        targetChain += parent
+        parent = owner.parent
+    }
+    return target.bounds
+}
+
+internal fun DetailWindow.orderPath(node: DetailNode): List<Int> {
+    val index = nodes.indexOfFirst { it === node }
+    if (index < 0) return emptyList()
+    return generateSequence(index) { i -> nodes[i].parent.takeIf { it >= 0 } }.toList().asReversed()
+}
+
+/** 不把叠放的两个页面拼成一组控件。查看分叉处各自的区域，而非只比较叶节点。 */
+internal fun DetailWindow.sameOrderSurface(a: DetailNode, b: DetailNode): Boolean {
+    val first = orderPath(a)
+    val second = orderPath(b)
+    val split = first.zip(second).indexOfFirst { (x,y) -> x != y }
+    if (first.isEmpty() || second.isEmpty() || split == 0) return false
+    if (split < 0) return true
+    val one = nodes[first[split]].bounds ?: return false
+    val two = nodes[second[split]].bounds ?: return false
+    return a.bounds != null && b.bounds != null && !one.contains(b.bounds) && !two.contains(a.bounds)
+}
+
+internal val orderListTitles = setOf("搜索订单","搜索我的订单","全部订单","订单列表","历史订单","我的订单")
+internal val orderPanelTitles = setOf("订单筛选","筛选条件","订单过滤")
+
+/** 在控件树中找到包含锚点的最小同页分支。页面切换期间仍可见的背景节点不能提供字段。 */
+internal fun DetailWindow.orderRegion(anchor: DetailNode, matches: (List<DetailNode>) -> Boolean): List<DetailNode>? {
+    val position = nodes.indexOfFirst { it === anchor }
+    if (position < 0) return null
+    var root = nodes[position].parent
+    while (root >= 0) {
+        val indices = mutableSetOf(root)
+        val live = mutableListOf<DetailNode>()
+        for (i in root until nodes.size) {
+            val n = nodes[i]
+            if (i != root && n.parent !in indices) break
+            indices += i
+            if (n.visible && n.bounds?.isEmpty == false) live += n
+        }
+        if (matches(live)) return live
+        root = nodes[root].parent
+    }
+    return null
+}
+
+/** 同一标签可能由容器和文字子控件重复上报；相邻或不同页面的节点不能按面积合并。 */
+internal fun DetailWindow.uniqueOrderNode(candidates: List<DetailNode>): DetailNode? {
+    if (candidates.size <= 1) return candidates.singleOrNull()
+    val deepest = candidates.maxBy { orderPath(it).size }
+    val path = orderPath(deepest)
+    if (candidates.all { n -> n.label == deepest.label && path.any { nodes[it] === n } }) return deepest
+    return foregroundOrderNode(candidates)
+}
+
+/** 比较候选所在分支的绘制顺序。用覆盖背景的页面容器判断，不要求两个列表的视口等高。 */
+internal fun DetailWindow.foregroundOrderNode(candidates: List<DetailNode>): DetailNode? {
+    if (candidates.size <= 1) return candidates.singleOrNull()
+    val paths = candidates.map { orderPath(it) }
+    return candidates.indices.singleOrNull { front ->
+        candidates.indices.filter { it != front }.all { back ->
+            val frontPath = paths[front]
+            val backPath = paths[back]
+            val split = frontPath.zip(backPath).indexOfFirst { (a,b) -> a != b }
+            if (split < 1) false else {
+                val upper = nodes[frontPath[split]]
+                val lower = nodes[backPath[split]]
+                val area = upper.bounds
+                lower.drawingOrder > 0 && upper.drawingOrder > lower.drawingOrder && area != null &&
+                    area.contains(candidates[front].bounds!!) && area.contains(candidates[back].bounds!!)
+            }
+        }
+    }?.let(candidates::get)
+}
+
+/** 筛选后，部分页面将新结果插在原列表和固定工具栏之间。三者必须同父，且保留提交前的原视口。 */
+internal fun DetailWindow.ownsResultToolbar(
+    control: DetailNode, result: DetailNode, lists: List<DetailNode>, previous: Rect?
+): Boolean {
+    if (previous == null || lists.size != 2) return false
+    val old = lists.singleOrNull { it !== result && it.bounds == previous } ?: return false
+    val view = result.bounds ?: return false
+    val resultPath = orderPath(result)
+    val barPath = orderPath(control)
+    val oldPath = orderPath(old)
+    val split = resultPath.zip(barPath).indexOfFirst { (a,b) -> a != b }
+    if (split < 1 || oldPath.size <= split || oldPath.take(split) != resultPath.take(split)) return false
+    val body = nodes[resultPath[split]]
+    val bar = nodes[barPath[split]]
+    val prior = nodes[oldPath[split]]
+    val toolbar = bar.bounds ?: return false
+    val area = body.bounds ?: return false
+    return prior.drawingOrder > 0 && body.drawingOrder == prior.drawingOrder + 1 &&
+        bar.drawingOrder == body.drawingOrder + 1 && area.contains(previous) && area.contains(view) &&
+        area.top == toolbar.top && toolbar.left == view.left && toolbar.right == view.right &&
+        toolbar.contains(control.bounds!!) && view.top - toolbar.bottom in 0..control.bounds.height() &&
+        view != previous
+}
+
 /** 一个查询的内存态。详情和列表通过独立后台屏打开，不向主屏发送返回键。 */
 internal class OrderCollection(private val source: String, until: ZonedDateTime, path: List<String>?, val compareFilter: Boolean = false) {
     private val ledger = MonthlyOrderLedger(until)
@@ -89,12 +208,14 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
 
     suspend fun runWindow(connected: () -> Boolean, observe: () -> DetailWindow?, tap: (DetailNode) -> Boolean,
         scroll: (DetailNode) -> Boolean, choose: ((List<String>) -> String?)?,
-        sample: (suspend (List<DetailNode>) -> List<Int>?)? = null, panelVisible: (Boolean) -> Unit = {}): DeviceResponse {
+        sample: (suspend (List<DetailNode>) -> List<Int>?)? = null, panelVisible: (Boolean) -> Unit = {},
+        tapBillDate: (DetailNode) -> Boolean = tap): DeviceResponse {
         anotherWindow = false
         awaitingReceipt?.let { (order, total) ->
             stage = "从账单反查原订单"
-            val paid = LinkedOrderReceipt(order, total).read(connected, observe, tap, scroll)
-                ?: return DeviceResponse.NeedsUser("账单扣款与原订单未能逐项核对，未提交总额。")
+            val receipt = LinkedOrderReceipt(order, total)
+            val paid = receipt.read(connected, observe, tap, scroll, tapBillDate)
+                ?: return DeviceResponse.NeedsUser("账单扣款与原订单未能逐项核对（${receipt.stage}），未提交总额。")
             current += order.copy(originalPaidCents = paid)
             awaitingReceipt = null
             anotherWindow = true
@@ -102,6 +223,7 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
         }
         val trial = withTimeoutOrNull(75000) {
             var filtered = false
+            var originalViewport: Rect? = null
             var step = 0
             var pageNumber = 0
             var previousPage: List<String>? = null
@@ -173,11 +295,40 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
                 }
 
                 val located = listWindows(window)
-                val listHeading = labels.any { it in setOf("全部订单","我的订单","订单列表","搜索订单","搜索我的订单","历史订单") }
-                val page = activeOrderPage(window, located)?.takeIf { listHeading }
-                if (listHeading && located.size > 1 && page == null)
-                    return@withTimeoutOrNull DeviceResponse.NeedsUser("存在重叠订单列表，无法核对当前集合。")
+                val listHeading = labels.any { it in orderListTitles }
+                val page = activeOrderPage(window, located, originalViewport)?.takeIf { listHeading }
+                if (!filtered && pageNumber == 0 && listHeading && located.isNotEmpty() && live.any { it.label == "筛选" }) {
+                    originalViewport = located.singleOrNull()?.view?.bounds
+                    stage = "重新核对时间和外卖筛选"
+                    val reason = try {
+                        applyOrderFilters({ if (connected()) observe() else null }, tap, sample, panelVisible) { view ->
+                            val lists = listWindows(view)
+                            val result = activeOrderPage(view, lists, originalViewport) ?: return@applyOrderFilters null
+                            val viewports = lists.map { it.view }
+                            val filters = view.nodes.filter { n ->
+                                if (!n.visible || n.label != "筛选" || n.bounds?.isEmpty != false ||
+                                    n.bounds.bottom > result.view.bounds!!.top) return@filter false
+                                view.ownsResultToolbar(n,result.view,viewports,originalViewport) ||
+                                    view.sameOrderSurface(n, result.view) && view.orderRegion(n) { region ->
+                                        region.any { it === result.view } &&
+                                            lists.none { other -> other !== result && region.any { it === other.view } }
+                                    } != null
+                            }
+                            view.foregroundOrderNode(filters)
+                        }
+                    } finally { panelVisible(false) }
+                    if (reason != null) return@withTimeoutOrNull DeviceResponse.NeedsUser(reason)
+                    filtered = true
+                    continue
+                }
+                if (listHeading && located.isNotEmpty() && page == null)
+                    return@withTimeoutOrNull DeviceResponse.NeedsUser("无法将当前页标题与唯一的订单列表对应，本轮未更新。")
                 if (page == null) {
+                    // 提交后可能继续读到旧弹层，直到结果页可读之前不再点击任何导航。
+                    if (filtered) {
+                        stage = "已提交筛选，等待来源提供与当前页标题同层的订单列表"
+                        continue
+                    }
                     if (pageNumber != 0 || previousPage != null) continue
                     val candidates = live.filter { it.label in navigation && !it.selected }.groupBy { it.label }
                         .mapNotNull { (name, group) ->
@@ -195,15 +346,6 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
                         if (step == steps.size) steps += next
                         step++;delay(1100)
                     }
-                    continue
-                }
-                if (!filtered && pageNumber == 0 && live.any { it.label == "筛选" }) {
-                    stage = "重新核对时间和外卖筛选"
-                    val reason = try {
-                        applyOrderFilters({ if (connected()) observe() else null }, tap, sample, panelVisible)
-                    } finally { panelVisible(false) }
-                    if (reason != null) return@withTimeoutOrNull DeviceResponse.NeedsUser(reason)
-                    filtered = true
                     continue
                 }
                 if (step != steps.size) return@withTimeoutOrNull DeviceResponse.NeedsUser("入口路径与试查时不同。")
@@ -231,9 +373,12 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
                     return@withTimeoutOrNull DeviceResponse.NeedsUser("来源中的订单总笔数相互冲突。")
                 val total = reported ?: collectionCount
                 val numbers = page.rowNumbers.filterNotNull()
-                val scope = filtered || (located.size == 1 && live.any { !it.clickable && it.label in setOf("全部订单","订单列表","我的订单") } &&
-                    live.any { it.selected && it.label in setOf("全部时间","不限时间","近3个月") } &&
-                    live.any { it.selected && it.label in setOf("全部类型","外卖","全部订单类型") })
+                val scope = filtered || window.orderRegion(page.view) { region ->
+                    val owned = region.filter { it.selected && window.sameOrderSurface(it,page.view) }
+                    located.none { other -> other !== page && region.any { it === other.view } } &&
+                        owned.any { it.label in setOf("全部时间","不限时间","近3个月") } &&
+                        owned.any { it.label in setOf("全部类型","外卖","全部订单类型") }
+                } != null
                 if (!scope || total != null && expectedRows?.let { it != total } == true ||
                     numbers.any { it < 0 || total != null && it >= total } ||
                     (numbers.size == current.size && numbers.zipWithNext().any { (a,b) -> b != a + 1 }))
@@ -272,22 +417,37 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
     }
 
     /** 重叠全屏页面以最近公共祖先处各分支的绘制次序裁决，无法确定覆盖关系时停止。 */
-    private fun activeOrderPage(window: DetailWindow, pages: List<WindowPage>): WindowPage? {
-        if (pages.size <= 1) return pages.singleOrNull()
-        val nodes = window.nodes
-        val paths = pages.associateWith { page ->
-            generateSequence(nodes.indexOfFirst { it === page.view }) { n -> nodes[n].parent.takeIf { it >= 0 } }
-                .toList().asReversed()
-        }
-        return pages.singleOrNull { top ->
-            pages.filter { it !== top }.all { back ->
-                val topPath = paths.getValue(top)
-                val backPath = paths.getValue(back)
-                val split = topPath.zip(backPath).indexOfFirst { (a,b) -> a != b }
-                split > 0 && top.view.bounds!!.contains(back.view.bounds!!) &&
-                    nodes[topPath[split]].drawingOrder > nodes[backPath[split]].drawingOrder
+    private fun activeOrderPage(window: DetailWindow, pages: List<WindowPage>, previous: Rect?): WindowPage? {
+        val front = window.foregroundOrderNode(pages.map { it.view }) ?: return null
+        val page = pages.single { it.view === front }
+        val frontBox = checkNotNull(front.bounds)
+        var ancestor = window.nodes.indexOfFirst { it === front }
+        while (ancestor >= 0) {
+            val branch = window.nodes[ancestor]
+            val over = window.nodes.withIndex().filter { (_,n) -> n.parent == branch.parent && n !== branch &&
+                n.drawingOrder > branch.drawingOrder && n.bounds?.contains(frontBox) == true }
+            for ((at, _) in over) {
+                val below = mutableSetOf(at)
+                for (i in at until window.nodes.size) {
+                    val n = window.nodes[i]
+                    if (i != at && n.parent !in below) break
+                    below += i
+                    if (n.visible && (n.label in orderListTitles || n.label in orderPanelTitles)) return null
+                }
             }
+            ancestor = branch.parent
         }
+        val titles = window.nodes.filter { it.visible && it.bounds?.isEmpty == false && it.label in orderListTitles }
+        val title = window.uniqueOrderNode(titles) ?: return null
+        val bar = title.bounds ?: return null
+        if (bar.bottom > frontBox.top || bar.centerX() !in frontBox.left..frontBox.right) return null
+        if (window.ownsResultToolbar(title,front,pages.map { it.view },previous)) return page
+        if (!window.sameOrderSurface(title,front)) return null
+        if (window.orderRegion(title) { region ->
+            region.any { it === front } && region.none { it.label in orderPanelTitles } &&
+                pages.none { other -> other !== page && region.any { it === other.view } }
+        } == null) return null
+        return page
     }
 
     /** 只处理每个完整记录都有一个独立时间行的集合，嵌套或缺字段的布局不能据此发布合计。 */

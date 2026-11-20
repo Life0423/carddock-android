@@ -5,11 +5,32 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import java.time.format.DateTimeFormatter
 
+/** 只允许补点位于交易视口内且没有被同层兄弟分支遮挡的日期。 */
+internal fun DetailWindow.exposesBillDate(target: DetailNode): Boolean {
+    val box = target.bounds ?: return false
+    if (password || box.isEmpty) return false
+    val date = nodes.singleOrNull { it.visible && it.role == target.role &&
+        it.label == target.label && it.bounds == box } ?: return false
+    val path = orderPath(date)
+    if (path.none { i -> nodes[i].scrollable && nodes[i].bounds?.contains(box) == true }) return false
+    val x = box.centerX()
+    val y = box.centerY()
+    return path.drop(1).none { i ->
+        val branch = nodes[i]
+        nodes.any { other -> other !== branch && other.parent == branch.parent && other.visible &&
+            other.bounds?.contains(x,y) == true &&
+            (branch.drawingOrder <= 0 || other.drawingOrder <= 0 || other.drawingOrder >= branch.drawingOrder) }
+    }
+}
+
 /** 从账单反查原订单。日期只定位候选，订单身份、下单时间及扣款与订单合计都要对上。 */
 internal class LinkedOrderReceipt(private val target: OrderObservation, private val orderTotal: Long) {
+    var stage = "打开账单入口"
+        private set
+
     suspend fun read(
         connected: () -> Boolean, observe: () -> DetailWindow?, tap: (DetailNode) -> Boolean,
-        scroll: (DetailNode) -> Boolean
+        scroll: (DetailNode) -> Boolean, tapBillDate: (DetailNode) -> Boolean = tap
     ): Long? = withTimeoutOrNull(45000) {
         val day = target.placed.format(DateTimeFormatter.ofPattern("MM-dd"))
         val date = Regex("""(?:\d{4}-)?\d\d-\d\d \d\d:\d\d(?::\d\d)?""")
@@ -25,38 +46,57 @@ internal class LinkedOrderReceipt(private val target: OrderObservation, private 
             val live = window.nodes.filter { it.visible && it.bounds?.isEmpty == false }
             val labels = live.map { it.label }
             if (amount != null) {
+                stage = "核对原订单身份和下单时间"
                 val fields = window.orderSemantics()
                 val ids = fields.orderIdentities()
                 val times = fields.orderTimes()
                 if (ids.isNotEmpty() && times.isNotEmpty())
                     return@withTimeoutOrNull amount.takeIf { ids.singleOrNull() == target.identity &&
                         times.singleOrNull() == target.placed && "订单已完成" in fields }
-                val expand = live.singleOrNull { it.label.endsWith("等") && "支付方式" in it.label }
-                if (expand != null && used.add(expand.label)) tap(expand)
+                val expand = live.singleOrNull { it.label.endsWith("等") && "支付方式" in it.label && it.label !in used }
+                if (expand != null && tap(expand)) used.add(expand.label)
                 continue
             }
             if (openedCandidate) {
-                val status = live.filter { it.label == "支付成功" }.distinctBy { it.bounds }.singleOrNull() ?: continue
-                val backLink = live.filter { it.label == "查看原订单" }.distinctBy { it.bounds }.singleOrNull() ?: continue
+                stage = "核对支付状态和查看原订单入口"
+                val status = window.uniqueOrderNode(live.filter { it.label == "支付成功" }) ?: continue
+                val backLink = window.uniqueOrderNode(live.filter { it.label == "查看原订单" }) ?: continue
+                if (!window.sameOrderSurface(status,backLink)) return@withTimeoutOrNull null
                 if (labels.any { it.contains("分次支付") || it.contains("组合支付") || it.contains("补付") }) return@withTimeoutOrNull null
                 // 只取支付状态正上方水平重叠的扣款，与原单币种明确的合计交叉核验。
                 val box = checkNotNull(status.bounds)
-                val debits = live.filter { it.bounds!!.left < box.right && it.bounds.right > box.left &&
+                val debits = live.filter { window.sameOrderSurface(status,it) && window.sameOrderSurface(backLink,it) &&
+                    it.bounds!!.left < box.right && it.bounds.right > box.left &&
                     it.bounds.bottom <= box.top && box.top - it.bounds.bottom <= box.height() * 2 }
                     .mapNotNull { Regex("""[-−]\s*(?:[¥￥]\s*)?(\d{1,9}(?:\.\d{1,2})?)""").matchEntire(it.label)
                         ?.groupValues?.get(1)?.toBigDecimal()?.movePointRight(2)?.longValueExact() }.distinct()
+                stage = "核对支付成功金额（候选 ${debits.size}）"
                 val paid = debits.singleOrNull()?.takeIf { it == orderTotal } ?: return@withTimeoutOrNull null
                 if (tap(backLink)) amount = paid
                 continue
             }
             if (inBills) {
-                if (labels.none { it in setOf("我的账单","全部账单","账单明细","账单") }) continue
+                stage = "等候带日期的账单列表"
+                // 账单首屏可能是当月收支摘要，交易日期在其下方。摘要只用于定位，只从支付凭证取金额。
+                val ledgerScreen = labels.any { it in setOf("全部账单","账单明细","账单") } ||
+                    "收支统计" in labels && "支出" in labels && "收入" in labels
+                if (!ledgerScreen) continue
                 val rows = live.filter { date.matches(it.label) && it.label.substringBefore(' ').endsWith(day) }
                     .distinctBy { it.bounds }
+                stage = "核对同日交易（候选 ${rows.size}，第 ${pages + 1} 屏）"
                 if (rows.size > 1) return@withTimeoutOrNull null
-                if (rows.size == 1 && tap(rows.single())) { openedCandidate = true; continue }
+                if (rows.size == 1) {
+                    stage = "打开已定位的同日交易"
+                    if (!tapBillDate(rows.single())) return@withTimeoutOrNull null
+                    openedCandidate = true
+                    continue
+                }
                 val pane = live.filter { it.scrollable && it.canGoForward }.maxByOrNull { it.bounds!!.height() }
-                if (pane == null || pages++ > 12 || !scroll(pane)) return@withTimeoutOrNull null
+                if (pane == null) {
+                    stage = "等待可滚动的账单记录"
+                    continue
+                }
+                if (pages++ >= 12 || !scroll(pane)) return@withTimeoutOrNull null
                 delay(600)
                 continue
             }

@@ -93,7 +93,11 @@ class PrototypeController(
         changeOrderNumber = creator::changeOrderNumber,
         demonstrateField = { creator.trial(demonstration = it) },
         prepareTemplate = { creator.trial(prepare = true) },
-        compareFilterForTrial = { creator.trial(prepare = true, compareFilter = true) },
+        compareFilterForTrial = {
+            val draft = creator.draft.value
+            creator.trial(prepare = draft?.personalTemplateId != null && draft.template == null, compareFilter = true)
+        },
+        compareFilterForCard = { id -> if (!resetting && sequence.value == null) runs.start(id, compareFilter = true) },
         generateCandidate = { creator.trial(generate = true) },
         changeCardRule = { id, rollback ->
             if (!resetting && sequence.value == null && !runs.hasLiveJob(id)) {

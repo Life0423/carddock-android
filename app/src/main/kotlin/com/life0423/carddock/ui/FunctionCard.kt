@@ -130,7 +130,8 @@ internal fun FunctionCard(
             }
             CardActions(card.id, phase, if (card.run?.appPrice == true && onPrice != null &&
                 phase in setOf(RunPhase.FAILED, RunPhase.INTERRUPTED, RunPhase.CANCELLED)
-            ) onPrice else onRefresh, onCancel, onResume, canStart)
+            ) onPrice else onRefresh, onCancel, onResume, canStart,
+                if (card.run?.message == com.life0423.carddock.platform.FILTER_APPEARANCE_REQUIRED) "允许本次在本机比对筛选项" else "重新核验")
         }
     }
 
@@ -158,6 +159,7 @@ private fun CardActions(
     onCancel: () -> Unit,
     onResume: () -> Unit,
     canStart: Boolean,
+    resumeLabel: String,
 ) {
     // NEEDS_USER 不算忙碌：设备读取已经返回，要同时给出接管和取消。忙碌时只能取消。
     when {
@@ -165,7 +167,7 @@ private fun CardActions(
             Text("取消运行")
         }
         phase == RunPhase.NEEDS_USER -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onResume, Modifier.weight(1f).testTag("resume_$id"), enabled = canStart) { Text("重新核验") }
+            Button(onResume, Modifier.weight(1f).testTag("resume_$id"), enabled = canStart) { Text(resumeLabel) }
             TextButton(onCancel, Modifier.testTag("cancel_$id")) { Text("取消") }
         }
         else -> FilledTonalButton(onRefresh, Modifier.fillMaxWidth().testTag("refresh_$id"), enabled = canStart) {

@@ -39,12 +39,12 @@ internal class RunCoordinator(
      * 收尾才摘不掉这次 job：start 正持有同一把可重入的锁。launch 返回后会留下一个已结束任务。
      * 正常读设备会先挂起，不走这条。
      */
-    fun start(cardId: String, appPrice: Boolean = false): Job? {
+    fun start(cardId: String, appPrice: Boolean = false, compareFilter: Boolean = false): Job? {
         val requestedAt = if (appPrice) now() else null
         synchronized(jobs) {
             jobs[cardId]?.takeIf { it.isActive }?.let { return it }
             if (cards.find(cardId) == null) return null
-            val job = scope.launch(start = CoroutineStart.LAZY) { run(cardId, appPrice, requestedAt) }
+            val job = scope.launch(start = CoroutineStart.LAZY) { run(cardId, appPrice, requestedAt, compareFilter) }
             jobs[cardId] = job
             job.start()
             return job
@@ -88,7 +88,7 @@ internal class RunCoordinator(
     fun hasLiveJob(cardId: String): Boolean =
         synchronized(jobs) { jobs[cardId]?.isCompleted == false }
 
-    private suspend fun run(cardId: String, appPrice: Boolean, requestedAt: Long?) {
+    private suspend fun run(cardId: String, appPrice: Boolean, requestedAt: Long?, compareFilter: Boolean) {
         val job = currentCoroutineContext()[Job]
         val runId = newId()
         try {
@@ -119,7 +119,7 @@ internal class RunCoordinator(
                     phase = RunPhase.RUNNING,
                     message = "正在读取页面",
                 )) }
-                val result = engine.execute(card.rule, ReadOptions(card.localTarget, appPrice, requestedAt)) { progress ->
+                val result = engine.execute(card.rule, ReadOptions(card.localTarget, appPrice, requestedAt, compareFilter = compareFilter)) { progress ->
                     update(cardId, runId) { it.copy(run = it.run!!.copy(
                         currentStep = progress.currentStep,
                         totalSteps = progress.totalSteps,

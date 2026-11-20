@@ -109,6 +109,11 @@ internal fun SpaceScreen(
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(if (demo) "${card.title} · 演示" else card.title,
                             style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        if (phase == RunPhase.NEEDS_USER && card.run?.message == com.life0423.carddock.platform.FILTER_APPEARANCE_REQUIRED) {
+                            TextButton(onClick = { actions.compareFilterForCard(card.id) }, enabled = sequence == null) {
+                                Text("允许本次在本机比对筛选项")
+                            }
+                        }
                         Text(summary ?: "暂无核验结果", style = MaterialTheme.typography.bodySmall,
                             maxLines = 2, overflow = TextOverflow.Ellipsis)
                         if (price != null) {
@@ -207,7 +212,10 @@ internal fun CardDetail(
                 card = card,
                 onRefresh = { actions.refreshCard(card.id) },
                 onCancel = { actions.cancelCard(card.id) },
-                onResume = { actions.resumeCard(card.id) },
+                onResume = {
+                    if (card.run?.message == com.life0423.carddock.platform.FILTER_APPEARANCE_REQUIRED)
+                        actions.compareFilterForCard(card.id) else actions.resumeCard(card.id)
+                },
                 onDelete = { actions.deleteCard(card.id) },
                 onPrice = if (card.rule.sourceId == JD_PACKAGE && card.snapshot != null) {
                     { actions.verifyPrice(card.id) }

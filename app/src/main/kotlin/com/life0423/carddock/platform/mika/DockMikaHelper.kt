@@ -88,6 +88,14 @@ private class DisplayService(private val shell: Context, private val uid: Int) :
         return open(surface, width, height, density, targetPackage, launcher)
     }
 
+    /** 多步回放从自己的新查询任务进入，避免把上次停留的筛选弹层当作启动首页。 */
+    override fun openIndependentLauncher(surface: Surface, width: Int, height: Int, density: Int, targetPackage: String): Int {
+        check(Binder.getCallingUid() == uid)
+        val launcher = shell.packageManager.getLaunchIntentForPackage(targetPackage) ?: return -1
+        launcher.addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+        return open(surface, width, height, density, targetPackage, launcher)
+    }
+
     override fun openCainiao(surface: Surface, width: Int, height: Int, density: Int): Int =
         open(surface, width, height, density, CAINIAO_PACKAGE,
             Intent(Intent.ACTION_VIEW, Uri.parse("guoguo://go/home_page"))
