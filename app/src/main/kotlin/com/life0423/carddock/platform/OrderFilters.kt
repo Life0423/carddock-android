@@ -6,6 +6,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 internal const val FILTER_APPEARANCE_REQUIRED =
     "来源没有标明筛选项是否选中。可以允许本次试查在本机比对筛选面板的按钮外观。"
 
+internal const val FILTER_REOPEN_FAILED = "订单结果页已出现，但未能重新打开筛选。"
+
 /** 重置筛选后逐项对照，再从结果页重新打开同一面板核验。像素只在本次用户同意且面板可辨认时采样。 */
 internal suspend fun applyOrderFilters(
     observe: () -> DetailWindow?, tap: (DetailNode) -> Boolean,
@@ -148,7 +150,7 @@ internal suspend fun applyOrderFilters(
             else -> "已提交筛选，但结果页标题、筛选入口与列表无法唯一对应。"
         }
     }
-    if (!press(resultFilter)) return "订单结果页已出现，但未能重新打开筛选。"
+    if (!press(resultFilter)) return FILTER_REOPEN_FAILED
     val restored = pair() ?: return unavailable
     panelVisible(sample != null)
     val retained = semantic && marked(restored).all { it } || visual && sample?.invoke(restored) == both

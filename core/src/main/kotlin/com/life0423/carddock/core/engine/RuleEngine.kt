@@ -40,10 +40,11 @@ class RuleEngine(
         val plan = rule.copy(steps = rule.steps.toList())
         RuleValidator.validate(plan)?.let { return EngineResult.Failure(it.code, it.message) }
 
-        onProgress(RunProgress(0, plan.steps.size, device.instruction(plan.sourceId, options)))
+        val readOptions = options.copy(reminderRoute = plan.reminderRoute, countRoute = plan.countRoute, orderPath = plan.orderPath)
+        onProgress(RunProgress(0, plan.steps.size, device.instruction(plan.sourceId, readOptions)))
         currentCoroutineContext().ensureActive()
         val response = try {
-            device.inspect(plan.sourceId, plan.targetKey, options.copy(reminderRoute = plan.reminderRoute, countRoute = plan.countRoute, orderPath = plan.orderPath))
+            device.inspect(plan.sourceId, plan.targetKey, readOptions)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {

@@ -3,6 +3,8 @@ package com.life0423.carddock.platform.mika
 import com.life0423.carddock.core.model.PickupEntry
 import com.life0423.carddock.core.rule.CountRoute
 import com.life0423.carddock.platform.orderActionBounds
+import com.life0423.carddock.platform.FILTER_APPEARANCE_REQUIRED
+import com.life0423.carddock.platform.nextOrderWindow
 import com.life0423.carddock.platform.CountField
 import com.life0423.carddock.platform.readVisibleCount
 import com.life0423.carddock.core.rule.ReminderRoute
@@ -107,7 +109,17 @@ internal class MikaBackgroundQuery(private val context: Context, private val foc
                     tapReceipt = { node -> connected() && reader.tapReadTarget(id,source,node,
                         lastWindow?.orderActionBounds(node) ?: node.bounds, keepGestureOnLabel = true, receiptTarget = true) })
             }
-            if (!scan.anotherWindow || result !is DeviceResponse.NeedsUser) return result
+            if (result !== nextOrderWindow) {
+                // 此提示由界面映射到单次授权按钮，保持它的协议值。
+                if (scan.reconciledCount == 0 || result is DeviceResponse.NeedsUser &&
+                    result.message == FILTER_APPEARANCE_REQUIRED) return result
+                val progress = " 本次已从付款凭证核对 ${scan.reconciledCount} 笔不同订单。"
+                return when (result) {
+                    is DeviceResponse.NeedsUser -> result.copy(message = result.message + progress)
+                    is DeviceResponse.Failed -> result.copy(message = result.message + progress)
+                    is DeviceResponse.Ready -> result
+                }
+            }
         } while (true)
     }
 
@@ -175,8 +187,12 @@ internal class MikaBackgroundQuery(private val context: Context, private val foc
                 val response = read(reader, id, {
                     focused() && CardDockAccessibilityService.instance === reader && shell.asBinder().isBinderAlive
                 }, filterFrame)
-                return if (focused() && shell.asBinder().isBinderAlive) response
-                    else DeviceResponse.Failed("卡坞离开前台或助手断开，本次结果未保存。")
+                return when {
+                    !shell.asBinder().isBinderAlive -> DeviceResponse.Failed("Mika 助手已断开。请重新连接后重试，本次结果未保存。")
+                    CardDockAccessibilityService.instance !== reader -> DeviceResponse.NeedsUser("页面读取服务已断开。请在「我的」重新连接后重试，本次结果未保存。")
+                    !focused() -> DeviceResponse.Failed("卡坞窗口已失去焦点。请回到卡坞重试，本次结果未保存。")
+                    else -> response
+                }
             } finally {
                 try {
                     shell.closeDisplay(id)

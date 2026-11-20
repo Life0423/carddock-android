@@ -12,6 +12,8 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 internal const val MONTHLY_ORDERS = "monthly-original-paid"
+// 仅在本次窗口完成一个可继续的步骤后返回此实例。断线和失焦的普通 NeedsUser 必须结束查询。
+internal val nextOrderWindow = DeviceResponse.NeedsUser("继续逐单核对。")
 private val navigation = setOf("我的","个人中心","订单","全部订单","我的订单","订单中心","订单列表","历史订单","交易记录","全部交易")
 private val orderId = Regex("""(?:订单号(?:码)?|订单编号)[：:]?\s*([A-Za-z0-9-]{6,64})""")
 private val placed = Regex("""下单时间[：:]?\s*(\d{4}-\d{2}-\d{2})(?:\s+(\d{2}:\d{2})(:\d{2})?)?""")
@@ -204,12 +206,14 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
     private val signatures = mutableListOf<List<String>>()
     private val current = mutableListOf<OrderObservation>()
     private var awaitingReceipt: Pair<OrderObservation, Long>? = null
+    private var retriedFilter = false
+    // 重叠视口可能再次打开同一凭证。中断提示只显示独立核对成功的订单数。
+    private val linkedReceipts = mutableSetOf<String>()
+    val reconciledCount: Int get() = linkedReceipts.size
     private val seenRows = mutableMapOf<Int, String>()
     private var expectedRows: Int? = null
     private var everyRowNumbered = true
     private var pageIndex = 0
-    var anotherWindow = false
-        private set
     var digest: String? = null
         private set
 
@@ -217,16 +221,15 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
         scroll: (DetailNode) -> Boolean, choose: ((List<String>) -> String?)?,
         sample: (suspend (List<DetailNode>) -> List<Int>?)? = null, panelVisible: (Boolean) -> Unit = {},
         tapReceipt: (DetailNode) -> Boolean = tap): DeviceResponse {
-        anotherWindow = false
         awaitingReceipt?.let { (order, total) ->
             stage = "从账单反查原订单"
             val receipt = LinkedOrderReceipt(order, total)
             val paid = receipt.read(connected, observe, tap, scroll, tapReceipt)
                 ?: return DeviceResponse.NeedsUser("账单扣款与原订单未能逐项核对（${receipt.stage}），未提交总额。")
+            linkedReceipts += order.identity
             current += order.copy(originalPaidCents = paid)
             awaitingReceipt = null
-            anotherWindow = true
-            return DeviceResponse.NeedsUser("已核对本笔，继续读取订单列表。")
+            return nextOrderWindow
         }
         val trial = withTimeoutOrNull(75000) {
             var filtered = false
@@ -234,6 +237,7 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
             var step = 0
             var pageNumber = 0
             var previousPage: List<String>? = null
+            var settledRows: List<Pair<String, Rect?>>? = null
             var detailMarker: String? = null
             val expanded = mutableSetOf<String>()
             var scrolls = 0
@@ -271,8 +275,7 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
                         (at < ledger.since.toLocalDateTime() || at >= ledger.until.toLocalDateTime() ||
                          !status || hasType && (!isDelivery || amounts.size == 1))) {
                         current += OrderObservation(ids.single(),at,status,isDelivery,amounts.singleOrNull())
-                        anotherWindow = true
-                        return@withTimeoutOrNull DeviceResponse.NeedsUser("继续核对下一笔。")
+                        return@withTimeoutOrNull nextOrderWindow
                     }
                     if (idleReads++ < 3) continue
                     if (ids.size == 1 && at != null && hasState && status && isDelivery && hasType && amounts.isEmpty()) {
@@ -282,8 +285,7 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
                         }.distinct()
                         totals.singleOrNull()?.let { total ->
                             awaitingReceipt = OrderObservation(ids.single(), at, true, true, null) to total
-                            anotherWindow = true
-                            return@withTimeoutOrNull DeviceResponse.NeedsUser("继续核对原订单支付记录。")
+                            return@withTimeoutOrNull nextOrderWindow
                         }
                     }
                     val expand = live.filter { it.label in setOf("展开订单信息","展开详情","查看明细","费用明细","金额明细","支付明细") ||
@@ -324,6 +326,11 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
                             view.foregroundOrderNode(filters)
                         }
                     } finally { panelVisible(false) }
+                    if (reason == FILTER_REOPEN_FAILED && !retriedFilter && connected()) {
+                        // 结果工具栏已出现但未能重开。保留已核对订单，只在新窗口重新验证本页一次。
+                        retriedFilter = true
+                        return@withTimeoutOrNull nextOrderWindow
+                    }
                     if (reason != null) return@withTimeoutOrNull DeviceResponse.NeedsUser(reason)
                     filtered = true
                     continue
@@ -360,6 +367,12 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
                 stage = "已到订单集合，核对第 ${pageNumber + 1} 屏"
                 val sig = page.markers.map { it.label }
                 if (previousPage == sig) continue
+                // 翻页后标签可先于滚动停稳出现。只记录和点击连续两次观察位置相同的订单行。
+                val layout = page.markers.map { it.label to it.bounds }
+                if (layout != settledRows) {
+                    settledRows = layout
+                    continue
+                }
                 if (pageNumber < signatures.size && signatures[pageNumber] != sig)
                     return@withTimeoutOrNull DeviceResponse.NeedsUser("重新打开页面后订单列表有变化，请重试。")
                 if (pageNumber == 0 && page.view.canGoBack) return@withTimeoutOrNull DeviceResponse.NeedsUser("无法确认从列表顶部开始。")
@@ -370,7 +383,7 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
                 if (pageNumber == signatures.size) signatures += sig
                 if (current.size < page.markers.size) {
                     val item = page.markers[current.size]
-                    if (!tap(item)) return@withTimeoutOrNull DeviceResponse.NeedsUser("未能打开指定的订单详情。")
+                    if (!tap(item)) return@withTimeoutOrNull DeviceResponse.NeedsUser("未能打开第 ${pageNumber + 1} 屏第 ${current.size + 1} 条订单详情。")
                     detailMarker=item.label;delay(500);continue
                 }
                 // 列表预览、同屏隐藏层以及只露出时间的半条记录均不能证明完整性。

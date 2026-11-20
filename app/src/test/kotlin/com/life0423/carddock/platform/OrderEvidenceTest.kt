@@ -2,6 +2,7 @@ package com.life0423.carddock.platform
 
 import android.app.Application
 import android.graphics.Rect
+import com.life0423.carddock.core.port.DeviceResponse
 import com.life0423.carddock.core.engine.OrderObservation
 import java.time.LocalDateTime
 import kotlinx.coroutines.test.runTest
@@ -164,6 +165,53 @@ class OrderEvidenceTest {
         }, scroll = { error("已有完整流水入口") })
         assertEquals(2290L,paid)
         assertEquals(listOf("我的账单","查看全部账单","10-22 12:35","查看原订单"),taps)
+    }
+
+    @Test fun verifiedReceiptAloneCannotProveMonthlyCoverage() = runTest {
+        val root = DetailNode(-1,null,null,"",true,Rect(0,0,300,600))
+        val cutoff = java.time.ZonedDateTime.parse("2026-03-30T15:00:00+08:00")
+        val marker = "下单时间：2026-03-12"
+        val detail = listOf("订单已完成","订单类型：外卖","订单号：1000001","下单时间：2026-03-12 09:00:00","合计：￥18.90")
+        suspend fun trial(reportedCount: Int?): DeviceResponse {
+            val scan = OrderCollection("sample",cutoff,emptyList())
+            val pane = root.copy(parent=0,bounds=Rect(0,160,300,600),scrollable=true,collectionRows=reportedCount)
+            val list = DetailWindow("sample",listOf(root,field("全部订单",0).copy(parent=0),
+                field("全部时间",40,true).copy(parent=0),field("外卖",80,true).copy(parent=0),pane,
+                field(marker,180).copy(parent=4),field("已完成",240).copy(parent=4),
+                field("已显示全部订单",360).copy(parent=4)),false)
+            fun page(labels: List<String>) = DetailWindow("sample",listOf(root) +
+                labels.mapIndexed { i,s -> field(s,40*i).copy(parent=0) },false)
+            var view = list
+            var firstObservation = true
+            val observe = {
+                if (firstObservation) {
+                    firstObservation = false
+                    list.copy(nodes = list.nodes.map { n ->
+                        if (n.label == marker) n.copy(bounds = Rect(10,170,240,196)) else n
+                    })
+                } else view
+            }
+            val open: (DetailNode) -> Boolean = { n ->
+                if (n.label == marker) assertEquals(180,n.bounds!!.top)
+                view = when (n.label) {
+                    marker, "查看原订单" -> page(detail)
+                    "我的账单" -> page(listOf("全部账单","03-12 09:01"))
+                    "03-12 09:01" -> page(listOf("-18.90","支付成功","查看原订单"))
+                    else -> error("未知测试入口")
+                }
+                true
+            }
+            assertSame(nextOrderWindow,scan.runWindow({ true },observe,open,{ false },null))
+            view = page(listOf("我的账单"))
+            assertSame(nextOrderWindow,scan.runWindow({ true },{ view },open,{ false },null))
+            assertEquals(1,scan.reconciledCount)
+            view = list
+            return scan.runWindow({ true },{ view },open,{ false },null)
+        }
+        val full = trial(1) as DeviceResponse.Ready
+        assertEquals("18.90",full.snapshot.fields["paid"])
+        assertTrue(trial(null) is DeviceResponse.NeedsUser)
+        assertTrue(trial(2) is DeviceResponse.NeedsUser)
     }
 
     @Test fun paidReceiptMustLinkToSameOrderAndSecond() = runTest {

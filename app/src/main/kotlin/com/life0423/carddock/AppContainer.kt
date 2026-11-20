@@ -61,6 +61,7 @@ class AppContainer(private val context: Context) {
     internal val tools = mutableTools.asStateFlow()
     private val routedDevice = object : DeviceGateway {
         override fun instruction(sourceId: String, options: ReadOptions): String = when {
+            options.orderPath != null -> "正在逐单核对近月外卖和付款凭证，请保持卡坞在前台。"
             options.appPrice -> "60 秒内切到京东匹配详情。打开分享，停一秒再复制链接，等详情恢复后返回卡坞。"
             sourceId == MEITUAN_PACKAGE && options.localTarget == null -> "正在后台核验最近外卖…"
             sourceId == MEITUAN_PACKAGE -> if (options.localTarget?.routeOid != null) "正在后台核验美团订单…"
