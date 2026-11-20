@@ -5,6 +5,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalView
+import com.life0423.carddock.core.model.RunPhase
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.life0423.carddock.platform.CardDockAccessibilityService
@@ -35,6 +38,14 @@ class MainActivity : ComponentActivity() {
             val tools = container.tools.collectAsStateWithLifecycle()
             val readerConnected = CardDockAccessibilityService.connected.collectAsStateWithLifecycle()
             val assistant = DockMikaHandoff.display.collectAsStateWithLifecycle()
+            // 长时间逐单读取需要卡坞保持可见。查询结束或页面销毁后恢复系统息屏策略。
+            val view = LocalView.current
+            val running = state.value.draft?.phase == RunPhase.RUNNING ||
+                state.value.cards.any { it.run?.phase == RunPhase.RUNNING }
+            DisposableEffect(view, running) {
+                if (running) view.keepScreenOn = true
+                onDispose { if (running) view.keepScreenOn = false }
+            }
             CardDockApp(
                 state = state.value, actions = viewModel.actions, openAccessibilitySettings = {
                     startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))

@@ -212,6 +212,8 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
     val reconciledCount: Int get() = linkedReceipts.size
     private val seenRows = mutableMapOf<Int, String>()
     private var expectedRows: Int? = null
+    // 没有行号时，有些来源只在后续页面标出总数。先找证据，再从首页逐单核账。
+    private var foundCountDuringSurvey = false
     private var everyRowNumbered = true
     private var pageIndex = 0
     var digest: String? = null
@@ -231,7 +233,11 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
             awaitingReceipt = null
             return nextOrderWindow
         }
+        var lastSurveyPage = 0
         val trial = withTimeoutOrNull(75000) {
+            var surveying = false
+            var lastSurveyRows: List<Pair<String, Rect?>>? = null
+            var unchangedSurveyReads = 0
             var filtered = false
             var originalViewport: Rect? = null
             var step = 0
@@ -366,25 +372,13 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
                 learning = false
                 stage = "已到订单集合，核对第 ${pageNumber + 1} 屏"
                 val sig = page.markers.map { it.label }
-                if (previousPage == sig) continue
+                // 最后一次滚动可能只露出页脚，屏上的订单仍是同一组。
+                if (!surveying && previousPage == sig && !page.end) continue
                 // 翻页后标签可先于滚动停稳出现。只记录和点击连续两次观察位置相同的订单行。
                 val layout = page.markers.map { it.label to it.bounds }
                 if (layout != settledRows) {
                     settledRows = layout
                     continue
-                }
-                if (pageNumber < signatures.size && signatures[pageNumber] != sig)
-                    return@withTimeoutOrNull DeviceResponse.NeedsUser("重新打开页面后订单列表有变化，请重试。")
-                if (pageNumber == 0 && page.view.canGoBack) return@withTimeoutOrNull DeviceResponse.NeedsUser("无法确认从列表顶部开始。")
-                if (pageNumber < pageIndex) {
-                    if (!scroll(page.view)) return@withTimeoutOrNull DeviceResponse.NeedsUser("未能重新定位订单页。")
-                    previousPage=sig;pageNumber++;delay(650);continue
-                }
-                if (pageNumber == signatures.size) signatures += sig
-                if (current.size < page.markers.size) {
-                    val item = page.markers[current.size]
-                    if (!tap(item)) return@withTimeoutOrNull DeviceResponse.NeedsUser("未能打开第 ${pageNumber + 1} 屏第 ${current.size + 1} 条订单详情。")
-                    detailMarker=item.label;delay(500);continue
                 }
                 // 列表预览、同屏隐藏层以及只露出时间的半条记录均不能证明完整性。
                 val reported = page.reportedCounts.singleOrNull()
@@ -401,8 +395,47 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
                 } != null
                 if (!scope || total != null && expectedRows?.let { it != total } == true ||
                     numbers.any { it < 0 || total != null && it >= total } ||
-                    (numbers.size == current.size && numbers.zipWithNext().any { (a,b) -> b != a + 1 }))
+                    (numbers.size == page.markers.size && numbers.zipWithNext().any { (a,b) -> b != a + 1 }))
                     return@withTimeoutOrNull DeviceResponse.NeedsUser("未能核对筛选范围及订单行号，未提交总额。")
+                if (pageNumber == 0 && page.view.canGoBack)
+                    return@withTimeoutOrNull DeviceResponse.NeedsUser("无法确认从列表顶部开始。")
+                if (signatures.isEmpty() && pageNumber == 0 && !foundCountDuringSurvey && total == null && numbers.size < page.markers.size)
+                    surveying = true
+                if (surveying) {
+                    lastSurveyPage = pageNumber + 1
+                    stage = "正在第 ${lastSurveyPage} 屏查找筛选结果总笔数"
+                    if (total != null) {
+                        foundCountDuringSurvey = true
+                        // 只把本轮发现用于决定是否读详情；正式核账必须再次从来源读到总数。
+                        return@withTimeoutOrNull nextOrderWindow
+                    }
+                    if (page.end || !page.view.canGoForward)
+                        return@withTimeoutOrNull DeviceResponse.NeedsUser("筛选结果未提供可核对的总笔数或完整行号，无法确认是否漏单。")
+                    // 无障碍手势被系统接收不代表列表已经移动。给异步加载六秒，持续未动时将原因告诉用户。
+                    if (layout == lastSurveyRows) {
+                        if (++unchangedSurveyReads < 15) continue
+                        return@withTimeoutOrNull DeviceResponse.NeedsUser("订单列表滚动后仍显示同一组记录，未能核对总笔数。请稍后重试。")
+                    }
+                    if (pageNumber >= 40 || !scroll(page.view))
+                        return@withTimeoutOrNull DeviceResponse.NeedsUser("未能继续翻页核对订单总笔数，请重试。")
+                    lastSurveyRows = layout
+                    unchangedSurveyReads = 0
+                    pageNumber++
+                    delay(650)
+                    continue
+                }
+                if (pageNumber < signatures.size && signatures[pageNumber] != sig)
+                    return@withTimeoutOrNull DeviceResponse.NeedsUser("重新打开页面后订单列表有变化，请重试。")
+                if (pageNumber < pageIndex) {
+                    if (!scroll(page.view)) return@withTimeoutOrNull DeviceResponse.NeedsUser("未能重新定位订单页。")
+                    previousPage=sig;pageNumber++;delay(650);continue
+                }
+                if (pageNumber == signatures.size) signatures += sig
+                if (current.size < page.markers.size) {
+                    val item = page.markers[current.size]
+                    if (!tap(item)) return@withTimeoutOrNull DeviceResponse.NeedsUser("未能打开第 ${pageNumber + 1} 屏第 ${current.size + 1} 条订单详情。")
+                    detailMarker=item.label;delay(500);continue
+                }
                 if (total != null) expectedRows = total
                 everyRowNumbered = everyRowNumbered && numbers.size == current.size
                 for ((index, order) in page.rowNumbers.zip(current)) {
@@ -433,7 +466,9 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
             }
             DeviceResponse.NeedsUser("卡坞离开前台或助手断开。")
         }
-        return trial ?: DeviceResponse.NeedsUser("多步试查未取得完整证据。$stage")
+        return trial ?: DeviceResponse.NeedsUser(if (lastSurveyPage > 0)
+            "已检查到第 ${lastSurveyPage} 屏，仍未取得可核对的订单总笔数。本次未生成合计，可稍后重试。"
+        else "多步试查未取得完整证据。$stage")
     }
 
     /** 重叠全屏页面以最近公共祖先处各分支的绘制次序裁决，无法确定覆盖关系时停止。 */

@@ -172,7 +172,7 @@ class OrderEvidenceTest {
         val cutoff = java.time.ZonedDateTime.parse("2026-03-30T15:00:00+08:00")
         val marker = "下单时间：2026-03-12"
         val detail = listOf("订单已完成","订单类型：外卖","订单号：1000001","下单时间：2026-03-12 09:00:00","合计：￥18.90")
-        suspend fun trial(reportedCount: Int?): DeviceResponse {
+        suspend fun trial(reportedCount: Int?, withdrawCount: Boolean = false): DeviceResponse {
             val scan = OrderCollection("sample",cutoff,emptyList())
             val pane = root.copy(parent=0,bounds=Rect(0,160,300,600),scrollable=true,collectionRows=reportedCount)
             val list = DetailWindow("sample",listOf(root,field("全部订单",0).copy(parent=0),
@@ -201,17 +201,78 @@ class OrderEvidenceTest {
                 }
                 true
             }
-            assertSame(nextOrderWindow,scan.runWindow({ true },observe,open,{ false },null))
+            val first = scan.runWindow({ true },observe,open,{ false },null)
+            if (reportedCount == null) {
+                assertSame(list,view) // 无完整性依据时，不打开任何订单或账单。
+                return first
+            }
+            assertSame(nextOrderWindow,first)
             view = page(listOf("我的账单"))
             assertSame(nextOrderWindow,scan.runWindow({ true },{ view },open,{ false },null))
             assertEquals(1,scan.reconciledCount)
-            view = list
+            view = if (withdrawCount) list.copy(nodes=list.nodes.map { if (it === pane) it.copy(collectionRows=null) else it }) else list
             return scan.runWindow({ true },{ view },open,{ false },null)
         }
         val full = trial(1) as DeviceResponse.Ready
         assertEquals("18.90",full.snapshot.fields["paid"])
         assertTrue(trial(null) is DeviceResponse.NeedsUser)
         assertTrue(trial(2) is DeviceResponse.NeedsUser)
+        assertTrue(trial(1,withdrawCount=true) is DeviceResponse.NeedsUser)
+    }
+
+    @Test fun countOnlyOnLastPageMustBeReadAgainDuringReconciliation() = runTest {
+        val root = DetailNode(-1,null,null,"",true,Rect(0,0,300,600))
+        val markers = listOf("下单时间：2026-03-12","下单时间：2026-03-11","下单时间：2026-03-10")
+        fun listPage(index: Int, count: Int?, firstRow: Int) = DetailWindow("sample", listOf(root,
+            field("全部订单",0).copy(parent=0), field("全部时间",40,true).copy(parent=0),
+            field("外卖",80,true).copy(parent=0), root.copy(parent=0,scrollable=true,
+                bounds=Rect(0,160,300,600),canGoBack=index==1,canGoForward=index==0,collectionRows=count),
+            field(markers[firstRow],180).copy(parent=4), field("已完成",220).copy(parent=4),
+            field(markers[firstRow+1],270).copy(parent=4), field("已完成",310).copy(parent=4)) +
+            if (index==1) listOf(field("已显示全部订单",360).copy(parent=4)) else emptyList(),false)
+        suspend fun trial(finalCount: Int?, pageStarts: List<Int> = listOf(0,1)): DeviceResponse {
+            val scan = OrderCollection("sample", java.time.ZonedDateTime.parse("2026-03-30T15:00:00+08:00"), emptyList())
+            var surveyPage = 0
+            val sourceCount = pageStarts.last() + 2
+            assertSame(nextOrderWindow, scan.runWindow({ true }, {
+                listPage(surveyPage, if (surveyPage == 1) sourceCount else null, pageStarts[surveyPage])
+            },
+                { error("列表预查不应打开订单详情") }, { surveyPage++; true },null))
+            // 正式读取两页。末页的总数必须再次读到，相邻页面重叠的订单也只能计入一次。
+            val opened = mutableListOf<Int>()
+            suspend fun replay(): DeviceResponse {
+                var index = 0
+                var detail: Int? = null
+                return scan.runWindow({ true }, {
+                    detail?.let { item -> DetailWindow("sample",listOf(root) +
+                        listOf("订单已完成","订单类型：外卖","订单号：100000${item + 1}",
+                            markers[item] + " 09:00:00","原实付：￥1.00")
+                            .mapIndexed { i,v -> field(v,40*i).copy(parent=0) },false)
+                    } ?: listPage(index,if (index==1) finalCount else null, pageStarts[index])
+                }, { node -> detail = markers.indexOf(node.label).also { opened += it }; true },
+                    { index++; true },null)
+            }
+            repeat(4) { assertSame(nextOrderWindow,replay()) }
+            assertEquals(pageStarts.flatMap { listOf(it,it+1) },opened)
+            return replay().also { if (finalCount == null) assertNull(scan.digest) }
+        }
+        val stuck = OrderCollection("sample",java.time.ZonedDateTime.parse("2026-03-30T15:00:00+08:00"),emptyList())
+        var scrolls = 0
+        val unchanged = stuck.runWindow({ true }, { listPage(0,null,0) },
+            { error("滚动未生效，不应读取详情") }, { scrolls++; true },null)
+        assertTrue((unchanged as DeviceResponse.NeedsUser).message.contains("仍显示同一组记录"))
+        assertEquals(1,scrolls)
+        val delayed = OrderCollection("sample",java.time.ZonedDateTime.parse("2026-03-30T15:00:00+08:00"),emptyList())
+        var loading = false
+        val timeout = delayed.runWindow({ true }, { if (loading) null else listPage(0,null,0) },
+            { error("列表未加载，不应读取详情") }, { loading = true; true },null)
+        assertTrue((timeout as DeviceResponse.NeedsUser).message.contains("已检查到第 1 屏"))
+        val full = trial(3) as DeviceResponse.Ready
+        assertEquals("3.00",full.snapshot.fields["paid"])
+        assertEquals("3",full.snapshot.fields["orders"])
+        assertTrue((trial(null) as DeviceResponse.NeedsUser).message.contains("没有足够的总笔数"))
+        val footerOnly = trial(2, pageStarts=listOf(0,0)) as DeviceResponse.Ready
+        assertEquals("2.00",footerOnly.snapshot.fields["paid"])
     }
 
     @Test fun paidReceiptMustLinkToSameOrderAndSecond() = runTest {
