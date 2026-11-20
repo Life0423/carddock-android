@@ -102,6 +102,41 @@ class PersonalTemplateTest {
         }
     }
 
+    @Test fun monthlyReplayUsesSameCutoffAndRejectsDifferentOrdersWithTheSameTotal() = runTest {
+        val rule = RuleSpec(id="ledger",sourceId="orders",targetKey="monthly-original-paid",
+            steps=listOf(RuleStep.AssertTarget("monthly-original-paid"),RuleStep.ReadField("paid","paid","实付合计")),
+            orderPath=listOf("我的","全部订单"))
+        val template = TemplateDefinition("ledger","月账本","近月实付",TemplateKind.QUERY,"统计已完成订单",rule)
+        val fields = mapOf("paid" to "18.90")
+        val cutoff = 1_800_000_000_000L
+        var replayDigest = "different-orders"
+        val device = object : DeviceGateway {
+            override suspend fun inspect(sourceId: String,targetKey: String) = error("需要截止时刻和路线")
+            override suspend fun inspect(sourceId: String,targetKey: String,options: ReadOptions): DeviceResponse {
+                assertEquals(cutoff,options.requestedAt)
+                assertEquals(rule.orderPath,options.orderPath)
+                return DeviceResponse.Ready(DeviceSnapshot(sourceId,targetKey,fields,evidenceDigest=replayDigest))
+            }
+        }
+        val compiler = object : RuleCompiler {
+            override suspend fun compile(prompt: String) = CompileResult.Unsupported("需要试查")
+        }
+        val controller = PrototypeController(MemoryCardStore(emptyList()),compiler,RuleEngine(device),emptyList(),backgroundScope,
+            discover={ _,_ -> DiscoveryResult.Found(DiscoveredTemplate(template,fields,cutoff,"verified-orders")) })
+        controller.initialize()
+        with(controller.actions) {
+            openTemplateEditor(null)
+            changePrompt(template.examplePrompt)
+            prepareTemplate(); runCurrent()
+            assertEquals(RunPhase.NEEDS_USER,controller.state.value.draft?.phase)
+            assertNull(controller.state.value.draft?.preview)
+            replayDigest = "verified-orders"
+            prepareTemplate(); runCurrent()
+            assertEquals(RunPhase.SUCCEEDED,controller.state.value.draft?.phase)
+            assertEquals(replayDigest,controller.state.value.draft?.preview?.evidenceDigest)
+        }
+    }
+
     @Test fun pickupActionMustReplayTwiceBeforePublishingAndOnceForNewCard() = runTest {
         val rule = RuleSpec(id="pickup",sourceId="parcel",targetKey="status",steps=listOf(
             RuleStep.AssertTarget("status"),RuleStep.ReadField("status","status","待取状态")))
