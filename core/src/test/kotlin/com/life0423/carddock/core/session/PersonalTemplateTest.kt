@@ -110,19 +110,30 @@ class PersonalTemplateTest {
         val fields = mapOf("paid" to "18.90")
         val cutoff = 1_800_000_000_000L
         var replayDigest = "different-orders"
+        var expectedCutoff: Long? = cutoff
+        var confirmedFields = fields
+        var complete = true
+        var clock = 0L
         val device = object : DeviceGateway {
             override suspend fun inspect(sourceId: String,targetKey: String) = error("需要截止时刻和路线")
             override suspend fun inspect(sourceId: String,targetKey: String,options: ReadOptions): DeviceResponse {
-                assertEquals(cutoff,options.requestedAt)
+                assertEquals(expectedCutoff,options.requestedAt)
                 assertEquals(rule.orderPath,options.orderPath)
-                return DeviceResponse.Ready(DeviceSnapshot(sourceId,targetKey,fields,evidenceDigest=replayDigest))
+                if (!complete) return DeviceResponse.NeedsUser("来源没有给出完整订单数量。")
+                return DeviceResponse.Ready(DeviceSnapshot(sourceId,targetKey,confirmedFields,evidenceDigest=replayDigest))
             }
         }
         val compiler = object : RuleCompiler {
             override suspend fun compile(prompt: String) = CompileResult.Unsupported("需要试查")
         }
-        val controller = PrototypeController(MemoryCardStore(emptyList()),compiler,RuleEngine(device),emptyList(),backgroundScope,
-            discover={ _,_ -> DiscoveryResult.Found(DiscoveredTemplate(template,fields,cutoff,"verified-orders")) })
+        val cards = MemoryCardStore(emptyList())
+        val library = object : TemplateStore {
+            var entries = emptyList<PersonalTemplate>()
+            override suspend fun load() = entries
+            override suspend fun save(templates: List<PersonalTemplate>) { entries = templates }
+        }
+        val controller = PrototypeController(cards,compiler,RuleEngine(device,now={ ++clock }),emptyList(),backgroundScope,
+            templateStore=library,discover={ _,_ -> DiscoveryResult.Found(DiscoveredTemplate(template,fields,cutoff,"verified-orders")) })
         controller.initialize()
         with(controller.actions) {
             openTemplateEditor(null)
@@ -134,6 +145,22 @@ class PersonalTemplateTest {
             prepareTemplate(); runCurrent()
             assertEquals(RunPhase.SUCCEEDED,controller.state.value.draft?.phase)
             assertEquals(replayDigest,controller.state.value.draft?.preview?.evidenceDigest)
+            saveDraft(); runCurrent()
+            val saved = requireNotNull(library.entries.single().published)
+            assertEquals(rule.orderPath,saved.rule.orderPath)
+            expectedCutoff = null // 此后每次建卡或刷新都以当前时刻重新查询。
+            openCreator(saved); trialDraft(); runCurrent(); saveDraft(); runCurrent()
+            val card = cards.disk!!.single()
+            confirmedFields = mapOf("paid" to "25.10")
+            replayDigest = "new-orders"
+            refreshCard(card.id); runCurrent()
+            val updated = requireNotNull(cards.disk!!.single().snapshot)
+            assertEquals("25.10",updated.fields.single().value)
+            assertTrue(updated.fetchedAt > requireNotNull(card.snapshot).fetchedAt)
+            complete = false
+            refreshCard(card.id); runCurrent()
+            assertEquals(RunPhase.NEEDS_USER,cards.disk!!.single().run?.phase)
+            assertEquals(updated,cards.disk!!.single().snapshot)
         }
     }
 
