@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "CardDock"
-include(":app", ":core")
+include(":app", ":core", ":phone-pairing")

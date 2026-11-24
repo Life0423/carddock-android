@@ -1,5 +1,7 @@
 package com.life0423.carddock.platform
 
+import com.life0423.carddock.core.model.PhoneCapability
+
 import com.life0423.carddock.core.port.DeviceResponse
 import com.life0423.carddock.core.port.DeviceSnapshot
 import com.life0423.carddock.core.port.orderIdentity
@@ -15,7 +17,7 @@ internal class MeituanGateway(
     private val trace: ((String) -> Unit)? = null,
     private val missing: String = "未读到完整详情。请重试，切到美团已完成订单并展开“订单信息”。",
 ) {
-    suspend fun inspect(): DeviceResponse = withTimeoutOrNull(25_000) {
+    suspend fun inspect(includeTotal: Boolean = false): DeviceResponse = withTimeoutOrNull(25_000) {
         var expansionAttempts = 0
         var lastStage = ""
         val start = System.nanoTime()
@@ -26,7 +28,7 @@ internal class MeituanGateway(
         while (true) {
             if (!connected()) {
                 stage("disconnected")
-                return@withTimeoutOrNull DeviceResponse.NeedsUser(disconnected)
+                return@withTimeoutOrNull DeviceResponse.NeedsUser(disconnected, PhoneCapability.PAGE_READER)
             }
             val page = observe()
             if (trace != null) {
@@ -40,11 +42,17 @@ internal class MeituanGateway(
             }
             if (page?.source == MEITUAN_PACKAGE) {
                 if (page.isLogin()) return@withTimeoutOrNull DeviceResponse.NeedsUser("请先在美团登录，再重试。")
-                page.readOrder()?.let { order ->
+                page.readOrder(includeTotal)?.let { order ->
+                    val fields = mutableMapOf("status" to order.status, "orderTime" to order.time)
+                    if (includeTotal) {
+                        val cents = order.totalCents ?: return@let
+                        fields["amount"] = "¥" + java.math.BigDecimal.valueOf(cents, 2).toPlainString()
+                        fields["currency"] = "人民币（CNY）"
+                    }
                     stage("verified")
                     return@withTimeoutOrNull DeviceResponse.Ready(DeviceSnapshot(
                         MEITUAN_PACKAGE, orderIdentity(order.number),
-                        mapOf("status" to order.status, "orderTime" to order.time),
+                        fields,
                         "美团 · 当前订单详情",
                     ))
                 }
@@ -59,5 +67,5 @@ internal class MeituanGateway(
         }
         @Suppress("UNREACHABLE_CODE")
         null
-    } ?: DeviceResponse.NeedsUser(missing)
+    } ?: DeviceResponse.NeedsUser(if (includeTotal) "未能在同一已完成订单详情核对身份、合计与人民币标记，请重试。" else missing)
 }

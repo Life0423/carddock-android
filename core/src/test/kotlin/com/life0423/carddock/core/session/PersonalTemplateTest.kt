@@ -1,5 +1,7 @@
 package com.life0423.carddock.core.session
 
+import com.life0423.carddock.core.model.ticketFace
+import com.life0423.carddock.core.model.DisplayField
 import com.life0423.carddock.core.engine.RuleEngine
 import com.life0423.carddock.core.model.LocalTarget
 import com.life0423.carddock.core.model.PersonalTemplate
@@ -102,6 +104,49 @@ class PersonalTemplateTest {
         }
     }
 
+    /** 源菜单的候选不授予保存资格；复核后的分组和门店要一直传递到空间刷新。 */
+    @Test fun fixedMealRequiresReplayAndKeepsPreviousResultWhenUnavailable() = runTest {
+        val menu = com.life0423.carddock.core.rule.MealMenu("示例餐厅", mapOf("第一组" to listOf("甲"), "第二组" to listOf("乙")))
+        val dish = com.life0423.carddock.core.rule.MealTarget("示例套餐")
+        val key = "REPEAT_MEAL"
+        val rule = RuleSpec(id = "fixed", sourceId = "menu", targetKey = key,
+            steps = listOf(RuleStep.AssertTarget(key), RuleStep.ReadField("pair","pair","固定搭配")),
+            officialAction = com.life0423.carddock.core.rule.OfficialAction.REPEAT_MEAL, meal = dish)
+        val template = TemplateDefinition("fixed","常用搭配","核验菜单",TemplateKind.SHOPPING,"查看固定搭配", rule)
+        val picked = dish.copy(store = menu.store, choices = mapOf("第一组" to "甲", "第二组" to "乙"))
+        var available = true
+        val device = object : DeviceGateway {
+            override suspend fun inspect(sourceId: String, targetKey: String): DeviceResponse = error("缺少搭配参数")
+            override suspend fun inspect(sourceId: String, targetKey: String, options: ReadOptions): DeviceResponse {
+                if (options.meal == dish) return DeviceResponse.NeedsUser("请选择", mealMenu = menu)
+                assertEquals(picked, options.meal)
+                return if (available) DeviceResponse.Ready(DeviceSnapshot(sourceId, key, mapOf("pair" to "甲 + 乙")))
+                    else DeviceResponse.NeedsUser("本次菜单未见该套餐")
+            }
+        }
+        val cards = MemoryCardStore(emptyList())
+        val compiler = object : RuleCompiler { override suspend fun compile(prompt: String) = CompileResult.Success(template) }
+        val controller = PrototypeController(cards, compiler, RuleEngine(device), emptyList(), backgroundScope)
+        controller.initialize()
+        with(controller.actions) {
+            openTemplateEditor(null); chooseDraftTemplate(template); trialDraft(); runCurrent()
+            assertEquals(menu, controller.state.value.draft?.mealMenu)
+            assertNull(controller.state.value.draft?.preview)
+            saveDraft(); runCurrent()
+            assertTrue(controller.state.value.personalTemplates.isEmpty())
+            chooseDraftTemplate(template.copy(rule = rule.copy(meal = picked))); trialDraft(); runCurrent()
+            saveDraft(); runCurrent()
+            val saved = requireNotNull(controller.state.value.personalTemplates.single().published)
+            assertEquals(picked, saved.rule.meal)
+            openCreator(saved); trialDraft(); runCurrent(); saveDraft(); runCurrent()
+            val card = cards.disk!!.single()
+            available = false
+            refreshCard(card.id); runCurrent()
+            assertEquals(card.snapshot, cards.disk!!.single().snapshot)
+            assertEquals(RunPhase.NEEDS_USER, cards.disk!!.single().run?.phase)
+        }
+    }
+
     @Test fun monthlyReplayUsesSameCutoffAndRejectsDifferentOrdersWithTheSameTotal() = runTest {
         val rule = RuleSpec(id="ledger",sourceId="orders",targetKey="monthly-original-paid",
             steps=listOf(RuleStep.AssertTarget("monthly-original-paid"),RuleStep.ReadField("paid","paid","实付合计")),
@@ -164,6 +209,125 @@ class PersonalTemplateTest {
         }
     }
 
+    /** 已核验字段换序无需重查，保存的模板、卡片及后续刷新沿用所选主字段。 */
+    @Test fun reorderedPrimarySurvivesSaveAndRefresh() = runTest {
+        val rule = RuleSpec(id = "agenda", sourceId = "calendar", targetKey = "agenda", steps = listOf(
+            RuleStep.AssertTarget("agenda"), RuleStep.ReadField("name", "name", "名称"),
+            RuleStep.ReadField("time", "time", "时间")))
+        val template = TemplateDefinition("agenda", "提醒", "下一条提醒", TemplateKind.REMINDER, "看提醒", rule)
+        var reads = 0
+        val gateway = object : DeviceGateway {
+            override suspend fun inspect(sourceId: String, targetKey: String): DeviceResponse {
+                reads++
+                return DeviceResponse.Ready(DeviceSnapshot(sourceId, targetKey, mapOf("name" to "测试", "time" to "16:0$reads")))
+            }
+        }
+        val compiler = object : RuleCompiler {
+            override suspend fun compile(prompt: String) = CompileResult.Success(template)
+        }
+        val controller = PrototypeController(MemoryCardStore(emptyList()), compiler, RuleEngine(gateway),
+            listOf(template), backgroundScope)
+        controller.initialize()
+        with(controller.actions) {
+            openTemplateEditor(null); changePrompt(template.examplePrompt); prepareTemplate(); runCurrent()
+            val preview = requireNotNull(controller.state.value.draft?.preview)
+            val layout = preview.fields.reversed().map { DisplayField(it.key, it.label) }
+            changeDisplayFields(layout)
+            assertEquals(preview, controller.state.value.draft?.preview)
+            assertEquals(1, reads)
+            saveDraft(); runCurrent()
+            val saved = requireNotNull(controller.state.value.personalTemplates.single().published)
+            openCreator(saved); trialDraft(); runCurrent(); saveDraft(); runCurrent()
+            refreshCard(controller.state.value.cards.single().id); runCurrent()
+            val card = controller.state.value.cards.single()
+            assertEquals(layout, card.display)
+            assertEquals("16:03", requireNotNull(card.snapshot).ticketFace(card.display, card.rule).fields.first().value)
+        }
+    }
+
+    /** 卡片实例可单独换主字段，已发布的模板与试运行时间保持独立。 */
+    @Test fun cardPrimaryOverrideKeepsEvidenceAndPublishedLayout() = runTest {
+        val rule = RuleSpec(id = "order", sourceId = "store", targetKey = "detail", steps = listOf(
+            RuleStep.AssertTarget("detail"), RuleStep.ReadField("status", "status", "状态"),
+            RuleStep.ReadField("paid", "paid", "实付（元）")))
+        val template = TemplateDefinition("store", "订单", "只读", TemplateKind.QUERY, "查看订单", rule)
+        val gateway = object : DeviceGateway {
+            override suspend fun inspect(sourceId: String, targetKey: String) =
+                DeviceResponse.Ready(DeviceSnapshot(sourceId, targetKey, mapOf("status" to "已完成", "paid" to "20.50")))
+        }
+        val compiler = object : RuleCompiler {
+            override suspend fun compile(prompt: String) = CompileResult.Success(template)
+        }
+        val controller = PrototypeController(MemoryCardStore(emptyList()), compiler, RuleEngine(gateway),
+            listOf(template), backgroundScope)
+        controller.initialize()
+        with(controller.actions) {
+            openTemplateEditor(null); changePrompt(template.examplePrompt); prepareTemplate(); runCurrent()
+            saveDraft(); runCurrent()
+            val published = requireNotNull(controller.state.value.personalTemplates.single().published)
+            openCreator(published); trialDraft(); runCurrent()
+            val preview = requireNotNull(controller.state.value.draft?.preview)
+            val layout = listOf(DisplayField("paid", "实付（元）"), DisplayField("status", "状态"))
+            changeDisplayFields(layout)
+            assertEquals(preview, controller.state.value.draft?.preview)
+            saveDraft(); runCurrent()
+            val card = controller.state.value.cards.single()
+            assertEquals(layout, card.display)
+            assertTrue(requireNotNull(controller.state.value.personalTemplates.single().published).display.isEmpty())
+            refreshCard(card.id); runCurrent()
+            val refreshed = controller.state.value.cards.single()
+            val face = requireNotNull(refreshed.snapshot).ticketFace(refreshed.display, refreshed.rule)
+            assertEquals(com.life0423.carddock.core.model.TicketRole.AMOUNT, face.role)
+            assertEquals("20.50", face.fields.first().value)
+            setCardPrimary(card.id, "status"); runCurrent()
+            val changed = controller.state.value.cards.single()
+            assertEquals(refreshed.snapshot, changed.snapshot)
+            assertEquals("status", changed.display.first().key)
+            assertTrue(requireNotNull(controller.state.value.personalTemplates.single().published).display.isEmpty())
+        }
+    }
+
+    /** 读到空态也要单独验证交接。保存的列表卡不绑定包裹，点卡只发起状态查询。 */
+    @Test fun listHandoffIsRequiredForEachNewCard() = runTest {
+        val rule = RuleSpec(id = "list", sourceId = "parcel", targetKey = "status", steps = listOf(
+            RuleStep.AssertTarget("status"), RuleStep.ReadField("status", "status", "待取状态")))
+        val template = TemplateDefinition("list", "待取列表", "进入菜鸟后选择包裹", TemplateKind.EXPRESS,
+            "打开菜鸟待取列表", rule, opensPickupList = true)
+        var available = true
+        var handoffs = 0
+        val controller = PrototypeController(MemoryCardStore(emptyList()), object : RuleCompiler {
+            override suspend fun compile(prompt: String) = CompileResult.Success(template)
+        }, RuleEngine(object : DeviceGateway {
+            override suspend fun inspect(sourceId: String, targetKey: String) =
+                DeviceResponse.Ready(DeviceSnapshot(sourceId, targetKey, mapOf("status" to "暂无待取包裹")))
+        }), emptyList(), backgroundScope, verifyPickupList = {
+            handoffs++
+            if (available) null else DeviceResponse.NeedsUser("未能交接列表", com.life0423.carddock.core.model.PhoneCapability.HELPER)
+        })
+        controller.initialize()
+        with(controller.actions) {
+            openTemplateEditor(null)
+            changePrompt(template.examplePrompt)
+            prepareTemplate(); runCurrent(); saveDraft(); runCurrent()
+            val saved = controller.state.value.personalTemplates.single().published!!
+            assertTrue(saved.opensPickupList)
+            openCreator(saved)
+            available = false
+            trialDraft(); runCurrent(); saveDraft(); runCurrent()
+            assertEquals(RunPhase.NEEDS_USER, controller.state.value.draft?.phase)
+            assertEquals(com.life0423.carddock.core.model.PhoneCapability.HELPER, controller.state.value.draft?.missingCapability)
+            assertTrue(controller.state.value.cards.isEmpty())
+            available = true
+            trialDraft(); runCurrent(); saveDraft(); runCurrent()
+            val card = controller.state.value.cards.single()
+            assertTrue(card.opensPickupList)
+            assertNull(card.localTarget)
+            assertNull(card.pickupEntry)
+            refreshCard(card.id); runCurrent()
+            assertEquals(3, handoffs)
+        }
+    }
+
     @Test fun pickupActionMustReplayTwiceBeforePublishingAndOnceForNewCard() = runTest {
         val rule = RuleSpec(id="pickup",sourceId="parcel",targetKey="status",steps=listOf(
             RuleStep.AssertTarget("status"),RuleStep.ReadField("status","status","待取状态")))
@@ -183,7 +347,7 @@ class PersonalTemplateTest {
             override suspend fun save(templates: List<PersonalTemplate>) { disk = templates }
         }
         val controller = PrototypeController(MemoryCardStore(emptyList()),compiler,RuleEngine(device),emptyList(),backgroundScope,
-            templateStore=library,verifyPickup={ runs++; if (runs == 1) "需要授权" else null },
+            templateStore=library,verifyPickup={ runs++; if (runs == 1) DeviceResponse.NeedsUser("需要授权") else null },
             discover={ _,_ -> DiscoveryResult.Found(DiscoveredTemplate(definition,mapOf("status" to "暂无待取包裹"))) })
         controller.initialize()
         with(controller.actions) {

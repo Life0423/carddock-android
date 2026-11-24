@@ -10,13 +10,14 @@ import re
 import sqlite3
 import unicodedata
 import uuid
+from pathlib import Path
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 FIELD_KEYS = {"cainiao-empty": {"status"}, "meituan-history": {"status", "orderTime"},
               "meituan-status": {"status"}, "jd-a": {"sku", "title", "variant"}, "jd-b": {"sku", "title", "variant"}}
-LISTING_FIELDS = """id, author, version, title, description, capability, display,
+LISTING_FIELDS = """id, author, version, title, description, capability, display, theme,
     (SELECT count(*) FROM downloads WHERE listing_id = listings.id) AS downloads"""
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
@@ -26,6 +27,7 @@ CREATE TABLE IF NOT EXISTS accounts (
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash BLOB PRIMARY KEY, account TEXT NOT NULL, expires INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS retired_invites (token_hash BLOB PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS listings (
     id TEXT PRIMARY KEY, author TEXT NOT NULL, local_id TEXT NOT NULL,
     version INTEGER NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL,
@@ -44,9 +46,11 @@ class RequestError(Exception):
         self.message = message
 
 
-def listing(row):
+def listing(row, show_theme):
     """向读者返回公开展示布局；旧版空布局维持原有响应格式。"""
     result = dict(row)
+    if not show_theme or result.get("theme") is None:
+        result.pop("theme", None)
     display = json.loads(result.pop("display"))
     if display:
         result["display"] = display
@@ -55,7 +59,7 @@ def listing(row):
 
 def publication(body):
     """入口只接受公开资料和能力代号。可执行规则由客户端从受支持的能力重建。"""
-    if not isinstance(body, dict) or body.keys() - {"display"} != {"localId", "version", "title", "description", "capability"}:
+    if not isinstance(body, dict) or body.keys() - {"display","theme"} != {"localId", "version", "title", "description", "capability"}:
         raise RequestError(400, "发布数据格式无效。")
     local_id, title, description, capability = (body[key] for key in ("localId", "title", "description", "capability"))
     version = body["version"]
@@ -77,7 +81,12 @@ def publication(body):
                           if unicodedata.category(char) != "Cf")
     if re.search(r"(?<!\d)(?:\d[\s\-]*){15,}", public_text):
         raise RequestError(400, "请从公开名称或说明中移除疑似订单号码。")
-    return local_id, version, title.strip(), description.strip(), capability, json.dumps(fields, ensure_ascii=False, sort_keys=True)
+    theme = body.get("theme")
+    if theme is not None and (not isinstance(theme, str) or theme not in {
+            "FOOD","PARCEL","ORDER","SHOPPING","DIGITAL","PRICE","BILL","FILE","CALENDAR","REMINDER",
+            "TRAVEL","TICKET","STUDY","WORK","SPORT","OTHER"}):
+        raise RequestError(400, "无法识别图标主题。")
+    return local_id, version, title.strip(), description.strip(), capability, json.dumps(fields, ensure_ascii=False, sort_keys=True), theme
 
 
 def hash_password(password, salt):
@@ -93,8 +102,8 @@ def check_password_format(password):
 
 def issue_session(db, user):
     token = secrets.token_urlsafe(32)
-    db.execute("DELETE FROM sessions WHERE expires <= unixepoch()")
-    db.execute("INSERT INTO sessions VALUES (?, ?, unixepoch() + 2592000)",
+    db.execute("DELETE FROM sessions WHERE expires <= CAST(strftime('%s','now') AS INTEGER)")
+    db.execute("INSERT INTO sessions VALUES (?, ?, CAST(strftime('%s','now') AS INTEGER) + 2592000)",
                (hashlib.sha256(token.encode()).digest(), user["name"]))
     return {"name": user["name"], "id": user["id"], "legacy": bool(user["legacy"]), "token": token}
 
@@ -150,19 +159,22 @@ class SquareHandler(BaseHTTPRequestHandler):
 
         credential = self.headers.get("Authorization", "").removeprefix("Bearer ")
         digest = hashlib.sha256(credential.encode()).digest()
-        if self.command == "POST" and endpoint.path in ("/account/password", "/account/logout"):
+        if self.command == "POST":
+            body = self.read_body()
+            # 先取得写事务再认证，注销返回后，旧会话不能再提交发布或下载。
             db.execute("BEGIN IMMEDIATE")
         user = db.execute("""SELECT accounts.* FROM accounts JOIN sessions ON accounts.name=sessions.account
-                             WHERE token_hash=? AND expires>unixepoch()""", (digest,)).fetchone()
+                             WHERE token_hash=? AND expires>CAST(strftime('%s','now') AS INTEGER)""", (digest,)).fetchone()
         account = user["name"] if user else None
         # 旧邀请码仅供旧客户端过渡，管理员迁移该账号后立即失效。
         if not account and credential:
             legacy = next((name for name, token in self.server.accounts.items()
                            if hmac.compare_digest(credential.encode(), token.encode())), None)
-            if legacy and not db.execute("SELECT 1 FROM accounts WHERE name=? AND salt IS NOT NULL",
+            if legacy and not db.execute("SELECT 1 FROM retired_invites WHERE token_hash=?", (digest,)).fetchone() and not db.execute("SELECT 1 FROM accounts WHERE name=? AND salt IS NOT NULL",
                                          (legacy,)).fetchone():
                 account = legacy
         # 旧客户端严格解析 JSON，仅返回可按旧协议完整呈现的条目。
+        show_theme = self.headers.get("X-CardDock-Theme") == "1"
         supports_display = self.headers.get("X-CardDock-Display") == "1"
         visible = "(display = '[]' OR ?)"
         if self.command == "GET" and endpoint.path == "/templates":
@@ -176,7 +188,7 @@ class SquareHandler(BaseHTTPRequestHandler):
                 WHERE active = 1 AND {visible} AND (instr(lower(title), lower(?)) OR instr(lower(description), lower(?)))
                 ORDER BY {order} LIMIT 100
             """, (supports_display, query, query))
-            return [listing(row) for row in rows]
+            return [listing(row, show_theme) for row in rows]
 
         listing_path = re.fullmatch(r"/templates/([a-f0-9-]{36})", endpoint.path)
         if self.command == "GET" and listing_path:
@@ -184,7 +196,7 @@ class SquareHandler(BaseHTTPRequestHandler):
                              (supports_display, listing_path[1])).fetchone()
             if not row:
                 raise RequestError(404, "此模板已下架。")
-            return listing(row)
+            return listing(row, show_theme)
 
         if account is None:
             raise RequestError(401, "请在「我的」登录账号。")
@@ -193,13 +205,21 @@ class SquareHandler(BaseHTTPRequestHandler):
         if self.command == "POST" and endpoint.path == "/account/logout":
             db.execute("DELETE FROM sessions WHERE token_hash=?", (digest,))
             return {}
-        if self.command == "POST" and endpoint.path == "/account/password":
-            body = self.read_body()
+        if self.command == "POST" and endpoint.path in ("/account/password", "/account/delete"):
             current = body.get("current")
-            password = check_password_format(body.get("password"))
-            if not user or not isinstance(current, str) or not hmac.compare_digest(
+            if not user or not isinstance(current, str) or not 1 <= len(current) <= 128 or not hmac.compare_digest(
                     hash_password(current, user["salt"]), user["password_hash"]):
                 raise RequestError(403, "当前密码错误。")
+            if endpoint.path == "/account/delete":
+                invite = self.server.accounts.get(account)
+                if invite:
+                    db.execute("INSERT OR IGNORE INTO retired_invites VALUES (?)", (hashlib.sha256(invite.encode()).digest(),))
+                db.execute("DELETE FROM downloads WHERE account=? OR listing_id IN (SELECT id FROM listings WHERE author=?)", (account, account))
+                db.execute("DELETE FROM listings WHERE author=?", (account,))
+                db.execute("DELETE FROM sessions WHERE account=?", (account,))
+                db.execute("DELETE FROM accounts WHERE name=?", (account,))
+                return {}
+            password = check_password_format(body.get("password"))
             salt = secrets.token_bytes(16)
             db.execute("UPDATE accounts SET salt=?, password_hash=? WHERE name=?",
                        (salt, hash_password(password, salt), account))
@@ -207,23 +227,21 @@ class SquareHandler(BaseHTTPRequestHandler):
             return issue_session(db, user)
         if self.command == "GET" and endpoint.path == "/account/templates":
             rows = db.execute(f"SELECT {LISTING_FIELDS} FROM listings WHERE active=1 AND author=? ORDER BY published_at DESC, rowid DESC", (account,))
-            return [listing(row) for row in rows]
+            return [listing(row, show_theme) for row in rows]
         if self.command == "POST" and endpoint.path == "/templates":
-            body = self.read_body()
-            local_id, version, title, description, capability, display = publication(body)
-            db.execute("BEGIN IMMEDIATE")
+            local_id, version, title, description, capability, display, theme = publication(body)
             old = db.execute("SELECT * FROM listings WHERE author = ? AND local_id = ?", (account, local_id)).fetchone()
             if old and (version < old["version"] or version == old["version"] and
-                        (title, description, capability, display) != (old["title"], old["description"], old["capability"], old["display"])):
+                        (title, description, capability, display, theme) != (old["title"], old["description"], old["capability"], old["display"], old["theme"])):
                 raise RequestError(409, "已有相同或更新版本，请先更新个人模板。")
             listing_id = old["id"] if old else str(uuid.uuid4())
             if not old:
-                db.execute("INSERT INTO listings (id,author,local_id,version,title,description,capability,active,published_at,display) VALUES (?, ?, ?, ?, ?, ?, ?, 1, unixepoch(), ?)",
-                           (listing_id, account, local_id, version, title, description, capability, display))
+                db.execute("INSERT INTO listings (id,author,local_id,version,title,description,capability,active,published_at,display,theme) VALUES (?, ?, ?, ?, ?, ?, ?, 1, CAST(strftime('%s','now') AS INTEGER), ?, ?)",
+                           (listing_id, account, local_id, version, title, description, capability, display, theme))
             elif not old["active"] or version > old["version"]:
-                db.execute("""UPDATE listings SET version = ?, title = ?, description = ?, capability = ?, display = ?,
-                            active = 1, published_at = unixepoch() WHERE id = ?""",
-                           (version, title, description, capability, display, listing_id))
+                db.execute("""UPDATE listings SET version = ?, title = ?, description = ?, capability = ?, display = ?, theme = ?,
+                            active = 1, published_at = CAST(strftime('%s','now') AS INTEGER) WHERE id = ?""",
+                           (version, title, description, capability, display, theme, listing_id))
             return {"id": listing_id}
 
         match = re.fullmatch(r"/templates/([a-f0-9-]{36})/(download|unpublish)", endpoint.path)
@@ -236,12 +254,11 @@ class SquareHandler(BaseHTTPRequestHandler):
             return {}
 
         # 与下架互斥。只有仍在架的条目才允许登记，并返回同一事务读取的版本。
-        db.execute("BEGIN IMMEDIATE")
         if not db.execute(f"SELECT 1 FROM listings WHERE id = ? AND active = 1 AND {visible}", (listing_id, supports_display)).fetchone():
             raise RequestError(404, "此模板已下架。")
         db.execute("INSERT OR IGNORE INTO downloads VALUES (?, ?)", (account, listing_id))
         row = db.execute(f"SELECT {LISTING_FIELDS} FROM listings WHERE id = ?", (listing_id,)).fetchone()
-        return listing(row)
+        return listing(row, show_theme)
 
     def reply(self, status, data):
         payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -255,9 +272,14 @@ class SquareHandler(BaseHTTPRequestHandler):
 def initialize_database(connection, legacy_names=()):
     """老广场条目补空布局，沿用发布版本和下载计数。"""
     connection.executescript(SCHEMA)
+    if isinstance(legacy_names, dict):
+        retired = {r[0] for r in connection.execute("SELECT token_hash FROM retired_invites")}
+        legacy_names = [name for name, token in legacy_names.items() if hashlib.sha256(token.encode()).digest() not in retired]
     reserved = set(legacy_names) | {r[0] for r in connection.execute("SELECT author FROM listings UNION SELECT account FROM downloads")}
     connection.executemany("INSERT OR IGNORE INTO accounts(name,id,legacy) VALUES (?,?,1)",
                            [(name, str(uuid.uuid4())) for name in reserved])
+    if "theme" not in {r[1] for r in connection.execute("PRAGMA table_info(listings)")} :
+        connection.execute("ALTER TABLE listings ADD COLUMN theme TEXT")
     if "display" not in {r[1] for r in connection.execute("PRAGMA table_info(listings)")}:
         connection.execute("ALTER TABLE listings ADD COLUMN display TEXT NOT NULL DEFAULT '[]'")
 
@@ -266,8 +288,23 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", required=True)
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--backup-to", type=Path, metavar="NEW_DB", help="复制在线数据库到新文件并核验；还原时以备份作为 --db")
     parser.add_argument("--migrate-user", metavar="NAME", help="为已确认身份的旧账号设置初始密码后退出")
     options = parser.parse_args()
+    if options.backup_to:
+        # 只读打开来源；拒绝覆盖已有数据库，恢复演练和日常备份共用 SQLite 的一致性快照。
+        with closing(sqlite3.connect(Path(options.db).resolve().as_uri() + "?mode=ro", uri=True)) as source:
+            with options.backup_to.open("xb"):
+                pass
+            try:
+                with closing(sqlite3.connect(options.backup_to)) as target:
+                    source.backup(target)
+                    if target.execute("PRAGMA quick_check").fetchone() != ("ok",):
+                        raise RuntimeError("备份校验失败")
+            except Exception:
+                options.backup_to.unlink()
+                raise
+        raise SystemExit(0)
     accounts = json.loads(os.environ.get("CARDDOCK_SQUARE_ACCOUNTS", "{}"))
     if (not isinstance(accounts, dict)
             or any(not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", name) or not isinstance(token, str)

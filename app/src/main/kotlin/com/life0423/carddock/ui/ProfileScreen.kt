@@ -48,6 +48,7 @@ internal fun ProfileScreen(
 ) {
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(requestLogin) { if (requestLogin && store != null) dialog = "登录" }
+    val context = androidx.compose.ui.platform.LocalContext.current
     val closeAccount = { dialog = null; onAccountClosed() }
     var showDemo by rememberSaveable { mutableStateOf(false) }
     if (store != null && dialog in listOf("登录", "修改密码")) {
@@ -75,13 +76,15 @@ internal fun ProfileScreen(
             }
         }
         item {
-            ProfileGroup("手机能力") {
+            ProfileGroup("手机设置") {
                 ProfileRow("页面读取", Icons.Rounded.Phone, if (pageReaderConnected) "已连接" else "待开启",
                     modifier = Modifier.testTag("accessibility_settings"), statusConnected = pageReaderConnected,
                     onClick = openAccessibilitySettings)
                 HorizontalDivider(color = DockColors.Outline)
-                ProfileRow("Mika 助手", Icons.Rounded.Build, if (mikaConnected) "已连接" else "待连接",
-                    statusConnected = mikaConnected) { dialog = "Mika 后台助手" }
+                ProfileRow("手机运行环境", Icons.Rounded.Build, if (mikaConnected) "助手已连接" else "查看状态",
+                    statusConnected = mikaConnected) {
+                    context.startActivity(android.content.Intent(context, com.life0423.carddock.phone.PhoneSetupActivity::class.java))
+                }
                 if (tools != null) {
                     HorizontalDivider(color = DockColors.Outline)
                     ProfileRow("模型配置", DockIcons.AutoAwesomeMosaic,
@@ -138,8 +141,22 @@ internal fun ProfileScreen(
                 text = { Column {
                     TextButton({ dialog = "修改密码" }, enabled = !account.busy) { Text("修改密码") }
                     TextButton(store::signOut, enabled = !account.busy) { Text("退出登录") }
+                    TextButton({ dialog = "注销账号" }, enabled = !account.busy) { Text("注销账号") }
                     account.message?.let { Text(it) }
                 } }, confirmButton = { TextButton(closeAccount) { Text("关闭") } })
+        }
+        "注销账号" -> if (store != null) {
+            var password by remember { mutableStateOf("") }
+            LaunchedEffect(account.signedIn) { if (!account.signedIn) closeAccount() }
+            AlertDialog(onDismissRequest = { if (!account.busy) closeAccount() }, title = { Text("注销账号") },
+                text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("将永久删除账号、已发布的模板、此账号的下载记录及本机广场收藏。个人模板和空间卡片保留。")
+                    OutlinedTextField(password, { password = it }, label = { Text("当前密码") },
+                        singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+                    account.message?.let { Text(it) }
+                } }, confirmButton = { TextButton({ store.deleteAccount(password) }, enabled = password.isNotBlank() && !account.busy) { Text("确认注销") } },
+                dismissButton = { TextButton(closeAccount, enabled = !account.busy) { Text("取消") } })
         }
         "我的发布" -> AlertDialog(onDismissRequest = { dialog = null }, title = { Text("我的发布") },
             text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -160,10 +177,14 @@ internal fun ProfileScreen(
             },
             confirmButton = { TextButton(onClick = { dialog = null }) { Text("关闭") } },
         )
+        "迁移模板与卡片" -> PersonalTransferDialog { dialog = null }
         "数据管理" -> AlertDialog(
             onDismissRequest = { dialog = null },
             title = { Text("数据管理") },
-            text = { Text("卡片和选购快照保存在本机。可恢复初始演示卡片。") },
+            text = { Column {
+                Text("卡片和个人模板保存在本机。")
+                TextButton({ dialog = "迁移模板与卡片" }) { Text("迁移模板与卡片") }
+            } },
             confirmButton = {
                 TextButton(onClick = { dialog = "重置演示内容" }, modifier = Modifier.testTag("reset_demo")) {
                     Text("重置演示内容")
@@ -183,12 +204,11 @@ internal fun ProfileScreen(
             },
             dismissButton = { TextButton(onClick = { dialog = null }) { Text("保留") } },
         )
-        "支持范围", "隐私与开源", "关于卡坞", "Mika 后台助手" -> AlertDialog(
+        "支持范围", "隐私与开源", "关于卡坞" -> AlertDialog(
             onDismissRequest = { dialog = null },
             title = { Text(checkNotNull(dialog)) },
             text = {
                 Text(when (dialog) {
-                    "Mika 后台助手" -> "调试版通过 USB 启动内置助手。连接电脑，在工程根目录运行 tools/start-mika-helper.ps1。卡坞进程退出或手机重启后需要重新连接。"
                     "支持范围" -> "可查询待取包裹、最近外卖和京东商品，也可试运行自己的提醒与数量模板。可用字段以本机试运行结果为准。"
                     "隐私与开源" -> "订单号码和模型密钥保存在本机。使用模型试查个人需求时，会向所配置的模型服务发送需求和必要的候选信息。卡坞采用 Apache 2.0 许可证。"
                     else -> "卡坞 CardDock · Android 原型"
@@ -240,8 +260,8 @@ private fun AccountForm(store: SquareStore, state: SquareState, change: Boolean,
 @Composable
 private fun ProfileGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (title.isNotEmpty()) Text(title, color = DockColors.Muted, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Surface(color = DockColors.Surface, shape = RoundedCornerShape(16.dp),
+        if (title.isNotEmpty()) Text(title, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif, color = DockColors.Text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Surface(color = if (title.isEmpty()) DockColors.Ticket else DockColors.Surface, shape = RoundedCornerShape(16.dp),
             border = BorderStroke(1.dp, DockColors.Outline)) {
             Column(content = content)
         }
@@ -261,11 +281,14 @@ private fun ProfileRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (icon == Icons.Rounded.Person) Surface(shape = androidx.compose.foundation.shape.CircleShape, color = DockColors.Mint) {
-            Icon(icon, null, Modifier.size(40.dp).padding(7.dp), tint = DockColors.Background)
-        } else Icon(icon, null, Modifier.size(22.dp), tint = DockColors.Muted)
+        if (icon == Icons.Rounded.Person) {
+            androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(com.life0423.carddock.R.drawable.ticket_wallet),
+                null, Modifier.size(44.dp))
+        } else Surface(shape = RoundedCornerShape(9.dp), color = DockColors.Raised) {
+            Icon(icon, null, Modifier.size(32.dp).padding(7.dp), tint = DockColors.Muted)
+        }
         Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        if (value != null) Text(value, color = if (statusConnected) DockColors.Mint else DockColors.Muted,
+        if (value != null) Text(value, color = if (statusConnected) DockColors.Sage else DockColors.Muted,
             style = MaterialTheme.typography.bodySmall)
         if (onClick != null) Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null,
             Modifier.size(18.dp), tint = DockColors.Muted)

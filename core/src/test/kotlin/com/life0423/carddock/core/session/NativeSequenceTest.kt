@@ -172,6 +172,7 @@ class NativeSequenceTest {
         actions.refreshSequence(listOf(manual.id, jd.id))
         runCurrent()
         assertTrue(controller.state.value.sequence!!.awaitingStart)
+        assertFalse(controller.refreshStoredCard(jd.id))
         assertTrue(calls.isEmpty())
         actions.advanceSequence()
         testScheduler.advanceTimeBy(300)

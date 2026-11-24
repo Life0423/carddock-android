@@ -1,7 +1,6 @@
 package com.life0423.carddock.data
 
 import android.content.Context
-import androidx.core.util.AtomicFile
 import com.life0423.carddock.core.model.CardRecord
 import com.life0423.carddock.core.port.CardStore
 import com.life0423.carddock.core.rule.RuleValidator
@@ -28,7 +27,7 @@ import kotlinx.serialization.json.Json
  * load 也要占这把锁：openRead 在正式文件还在时会删掉未完成的 .new。
  */
 class AtomicFileCardStore(context: Context, private val json: Json) : CardStore {
-    private val file = AtomicFile(File(context.applicationContext.filesDir, FILE_NAME))
+    private val file = CollectionFile(File(context.applicationContext.filesDir, FILE_NAME))
     private val lock = lockFor(file.baseFile)
 
     /**

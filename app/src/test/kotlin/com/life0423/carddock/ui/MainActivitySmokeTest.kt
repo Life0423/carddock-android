@@ -1,5 +1,6 @@
 package com.life0423.carddock.ui
 
+import com.life0423.carddock.core.model.CardTheme
 import android.os.Looper
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
@@ -30,6 +31,25 @@ import java.time.Duration
 class MainActivitySmokeTest {
     @get:Rule
     val compose = createAndroidComposeRule<MainActivity>()
+
+    /** 迁移必须识别真实的选购规则，并移除依赖本机授权的订单卡。 */
+    @Test fun portablePersonalRulesRoundTrip() {
+        val container = (compose.activity.application as CardDockApplication).container
+        val definition = com.life0423.carddock.monitorTemplate(com.life0423.carddock.core.rule.MonitorComparison(
+            com.life0423.carddock.core.rule.MonitorUse.OFFICE))
+        val compare = com.life0423.carddock.core.model.CardRecord("choice", definition.title, definition.kind, definition.rule, theme = CardTheme.WORK)
+        val order = compare.copy(id = "private", theme = CardTheme.BILL, rule = com.life0423.carddock.meituanTemplate.rule,
+            localTarget = com.life0423.carddock.core.model.LocalTarget("123456789012345"))
+        val archive = com.life0423.carddock.core.session.PersonalArchive(templates = emptyList(), cards = listOf(compare, order))
+        val portable = archive.portable(container::portableRule)
+        val json = kotlinx.serialization.json.Json
+        val raw = json.encodeToString(portable)
+        val imported = json.decodeFromString<com.life0423.carddock.core.session.PersonalArchive>(raw).also { it.validate() }
+        org.junit.Assert.assertFalse(raw.contains("123456789012345"))
+        org.junit.Assert.assertEquals(listOf(compare), imported.cards)
+        org.junit.Assert.assertEquals(CardTheme.BILL, imported.templates.single().edit?.theme)
+        org.junit.Assert.assertEquals(imported, imported.portable(container::portableRule))
+    }
 
     @Test
     fun realEntryLoadsCardsAndRefreshesThroughVerifiedEngine() {

@@ -143,6 +143,7 @@ internal class RunCoordinator(
                         )
                         is EngineResult.NeedsUser -> current.copy(run = run.copy(
                             phase = RunPhase.NEEDS_USER, message = result.message, endedAt = now(),
+                            missingCapability = result.missingCapability,
                         ))
                         is EngineResult.Failure -> current.copy(run = run.copy(
                             phase = RunPhase.FAILED, message = result.message, endedAt = now(),

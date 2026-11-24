@@ -40,7 +40,7 @@ internal suspend fun discoverReminder(context: Context, settings: ModelSettings,
     when (result) {
         is DeviceResponse.Ready -> DiscoveryResult.Found(DiscoveredTemplate(
             reminderTemplate(target, demand, checkNotNull(route)), result.snapshot.fields))
-        is DeviceResponse.NeedsUser -> DiscoveryResult.Incomplete(result.message)
+        is DeviceResponse.NeedsUser -> DiscoveryResult.Incomplete(result.message, result.missingCapability)
         is DeviceResponse.Failed -> DiscoveryResult.Incomplete(result.message)
     }
 }

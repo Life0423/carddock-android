@@ -1,5 +1,8 @@
 package com.life0423.carddock.ui
 
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -37,10 +40,14 @@ internal fun TemplatesScreen(
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         item {
-            TabRow(selectedTabIndex = section, containerColor = DockColors.Background) {
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
                 listOf("我的", "已下载", "收藏").forEachIndexed { index, label ->
-                    Tab(selected = section == index, onClick = { section = index },
-                        text = { Text(label) }, modifier = Modifier.testTag("library_section_$index"))
+                    SegmentedButton(selected = section == index, onClick = { section = index },
+                        shape = SegmentedButtonDefaults.itemShape(index, 3), icon = {},
+                        colors = SegmentedButtonDefaults.colors(activeContainerColor = DockColors.Surface,
+                            activeContentColor = DockColors.Mint, inactiveContainerColor = DockColors.Raised,
+                            inactiveContentColor = DockColors.Muted),
+                        modifier = Modifier.testTag("library_section_$index")) { Text(label) }
                 }
             }
         }
@@ -69,7 +76,11 @@ internal fun TemplatesScreen(
             "草稿" to personal.filter { it.published == null },
         )) {
             if (entries.isEmpty()) continue
-            item { Text(heading, modifier = Modifier.padding(vertical = 8.dp), color = DockColors.Muted, style = MaterialTheme.typography.titleSmall) }
+            item {
+                Text(heading, Modifier.padding(top = 12.dp).background(DockColors.Ticket,
+                    RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)).padding(horizontal = 14.dp, vertical = 6.dp),
+                    color = DockColors.Text, style = MaterialTheme.typography.titleSmall)
+            }
             itemsIndexed(entries, key = { _, entry -> entry.id }) { index, entry ->
                 val definition = entry.published
                 val title = definition?.title ?: entry.edit?.let { it.title.ifBlank { it.prompt.orEmpty().take(32) } }.orEmpty()
@@ -78,7 +89,10 @@ internal fun TemplatesScreen(
                     title, when {
                         definition == null -> entry.edit?.prompt.orEmpty().ifBlank { "尚未完成试运行" }
                         entry.edit != null -> "第 ${definition.revision} 版 · 有编辑草稿"
-                        else -> definition.examplePrompt.ifBlank { definition.description }
+                        definition.pickupEntry != null -> "到站可出示取件码"
+                        definition.rule.countRoute != null -> definition.rule.countRoute?.page.orEmpty()
+                        definition.rule.monitorComparison != null -> definition.description
+                        else -> ""
                     }, definition, enabled,
                     if (definition == null) "继续编辑" else "建卡",
                     { if (definition == null) onEdit(entry.id) else onUse(definition) },
@@ -127,7 +141,8 @@ internal fun CardTemplatePicker(
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 540.dp).testTag("template_picker"),
             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            item { Text("添加卡片", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
+            item { Text("选择卡片模板", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
+            item { FlowSteps(listOf("选模板", "配置试查", "添加到空间"), 0) }
             item {
                 OutlinedButton(onClick = onCreate, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("picker_new_template"),
                     shape = RoundedCornerShape(14.dp)) {
@@ -162,19 +177,33 @@ internal fun TemplateRow(
     first: Boolean = true, last: Boolean = true, rank: Int? = null,
     extra: @Composable () -> Unit = {},
 ) {
-    Surface(color = DockColors.Surface, shape = RoundedCornerShape(if (first) 16.dp else 3.dp, if (first) 16.dp else 3.dp,
+    val featured = rank == 1
+    Surface(color = if (featured) DockColors.Mint else DockColors.Surface,
+        contentColor = if (featured) MaterialTheme.colorScheme.onPrimary else DockColors.Text,
+        shape = RoundedCornerShape(if (first) 16.dp else 3.dp, if (first) 16.dp else 3.dp,
         if (last) 16.dp else 3.dp, if (last) 16.dp else 3.dp)) {
-        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 62.dp).padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             if (rank != null) Text(rank.toString().padStart(2, '0'),
-                color = if (rank == 1) DockColors.Mint else DockColors.Muted, style = MaterialTheme.typography.titleSmall)
-            if (template != null) KindIcon(template.kind)
+                color = if (featured) MaterialTheme.colorScheme.onPrimary else DockColors.Muted, style = MaterialTheme.typography.titleSmall)
+            if (template != null) KindIcon(template.kind, template.rule, theme = template.theme)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                Text(subtitle, maxLines = 2, overflow = TextOverflow.Ellipsis, color = DockColors.Muted, style = MaterialTheme.typography.bodySmall)
+                Text(title, style = if (featured) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                if (subtitle.isNotBlank()) Text(subtitle, maxLines = 2, overflow = TextOverflow.Ellipsis, color = if (featured) MaterialTheme.colorScheme.onPrimary else DockColors.Muted, style = MaterialTheme.typography.bodySmall)
             }
-            OutlinedButton(onUse, enabled = enabled, modifier = Modifier.heightIn(min = 40.dp).testTag(tag),
-                shape = RoundedCornerShape(10.dp), contentPadding = PaddingValues(horizontal = 10.dp)) { Text(action) }
+            // 小胶囊独立绘制，外层完整区域响应点按；长文案和大字可自然撑高。
+            Box(Modifier.widthIn(min = 60.dp).heightIn(min = 48.dp)
+                .clickable(enabled = enabled, role = Role.Button, onClick = onUse).testTag(tag),
+                contentAlignment = Alignment.Center) {
+                Surface(shape = RoundedCornerShape(20.dp),
+                    color = if (enabled) MaterialTheme.colorScheme.primaryContainer else DockColors.Raised) {
+                    Box(Modifier.widthIn(min = 56.dp).heightIn(min = 32.dp).padding(horizontal = 8.dp),
+                        contentAlignment = Alignment.Center) {
+                        Text(action, style = MaterialTheme.typography.labelLarge,
+                            color = if (enabled) DockColors.Mint else DockColors.Muted)
+                    }
+                }
+            }
             extra()
         }
     }

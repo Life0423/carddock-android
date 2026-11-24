@@ -1,5 +1,7 @@
 package com.life0423.carddock.core.session
 
+import com.life0423.carddock.core.model.PhoneCapability
+
 import com.life0423.carddock.core.model.CardRecord
 import com.life0423.carddock.core.model.PersonalTemplate
 import com.life0423.carddock.core.model.CardSnapshot
@@ -16,6 +18,8 @@ enum class DemoScenario { NORMAL, NEEDS_USER, READ_FAILURE, WRONG_TARGET }
  */
 data class CreationDraft(
     val prompt: String = "",
+    val mealMenu: com.life0423.carddock.core.rule.MealMenu? = null,
+    val preferredTheme: com.life0423.carddock.core.model.CardTheme? = null,
     val title: String = "",
     val template: TemplateDefinition? = null,
     val phase: RunPhase = RunPhase.IDLE,
@@ -30,6 +34,8 @@ data class CreationDraft(
     val ruleChangeCard: CardRecord? = null,
     val demonstrations: List<com.life0423.carddock.core.port.DiscoveredTemplate> = emptyList(),
     val rollingBackRule: Boolean = false,
+    val plans: List<TemplateDefinition> = emptyList(),
+    val missingCapability: PhoneCapability? = null,
 )
 
 /**
@@ -45,6 +51,7 @@ data class PrototypeState(
     val notice: String? = null,
     val sequence: SequenceStatus? = null,
     val personalTemplates: List<PersonalTemplate> = emptyList(),
+    val cardsReadable: Boolean = true,
 )
 
 /** 顺序核验停在需要用户切页的项目之前，明确展示当前进度。 */
@@ -71,6 +78,8 @@ data class PrototypeActions(
     val dismissNotice: () -> Unit,
     val openTemplateEditor: (String?) -> Unit = {},
     val chooseDraftTemplate: (TemplateDefinition) -> Unit = {},
+    val editReminder: (String, com.life0423.carddock.core.rule.LocalReminder) -> Unit = { _, _ -> },
+    val changeTheme: (com.life0423.carddock.core.model.CardTheme?) -> Unit = {},
     val changeDisplayFields: (List<com.life0423.carddock.core.model.DisplayField>) -> Unit = {},
     val changeTemplateDescription: (String) -> Unit = {},
     val keepTemplateDraft: () -> Unit = {},
@@ -78,6 +87,7 @@ data class PrototypeActions(
     val changeRouteOid: (String) -> Unit = {},
     val changeOrderNumber: (String) -> Unit = {},
     val demonstrateField: (Int) -> Unit = {},
+    val cancelTrial: () -> Unit = {},
     val prepareTemplate: () -> Unit = {},
     val compareFilterForTrial: () -> Unit = {},
     val compareFilterForCard: (String) -> Unit = {},
@@ -87,6 +97,7 @@ data class PrototypeActions(
     val advanceSequence: () -> Unit = {},
     val cancelSequence: () -> Unit = {},
     val toggleFavorite: (String) -> Unit = {},
+    val setCardPrimary: (String, String) -> Unit = { _, _ -> },
     val changeCardRule: (String, Boolean) -> Unit = { _, _ -> },
 
 )

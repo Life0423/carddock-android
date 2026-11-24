@@ -40,7 +40,8 @@ class RuleEngine(
         val plan = rule.copy(steps = rule.steps.toList())
         RuleValidator.validate(plan)?.let { return EngineResult.Failure(it.code, it.message) }
 
-        val readOptions = options.copy(reminderRoute = plan.reminderRoute, countRoute = plan.countRoute, orderPath = plan.orderPath)
+        val readOptions = options.copy(reminderRoute = plan.reminderRoute, countRoute = plan.countRoute, orderPath = plan.orderPath,
+            monitorComparison = plan.monitorComparison, localReminder = plan.localReminder, meal = plan.meal)
         onProgress(RunProgress(0, plan.steps.size, device.instruction(plan.sourceId, readOptions)))
         currentCoroutineContext().ensureActive()
         val response = try {
@@ -56,7 +57,7 @@ class RuleEngine(
         val snapshot = when (response) {
             is DeviceResponse.Ready -> response.snapshot
             is DeviceResponse.NeedsUser -> {
-                return EngineResult.NeedsUser(response.message.ifBlank { "请先完成所需操作，再继续执行。" })
+                return EngineResult.NeedsUser(response.message.ifBlank { "请先完成所需操作，再继续执行。" }, response.missingCapability, response.mealMenu)
             }
             is DeviceResponse.Failed -> {
                 return EngineResult.Failure(

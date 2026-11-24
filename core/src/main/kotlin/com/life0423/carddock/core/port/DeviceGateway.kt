@@ -1,5 +1,7 @@
 package com.life0423.carddock.core.port
 
+import com.life0423.carddock.core.model.PhoneCapability
+
 import com.life0423.carddock.core.model.AppPrice
 import com.life0423.carddock.core.model.LocalTarget
 import java.security.MessageDigest
@@ -7,7 +9,8 @@ import java.security.MessageDigest
 /** 一次读取的本机目标和模式。默认仍读取规则定义的字段。 */
 data class ReadOptions(val localTarget: LocalTarget? = null, val appPrice: Boolean = false, val requestedAt: Long? = null, val reminderRoute: com.life0423.carddock.core.rule.ReminderRoute? = null,
     val countRoute: com.life0423.carddock.core.rule.CountRoute? = null, val orderPath: List<String>? = null,
-    val compareFilter: Boolean = false)
+    val meal: com.life0423.carddock.core.rule.MealTarget? = null, val openMealPage: Boolean = false, val localReminder: com.life0423.carddock.core.rule.LocalReminder? = null,
+    val compareFilter: Boolean = false, val monitorComparison: com.life0423.carddock.core.rule.MonitorComparison? = null)
 
 /** 观测号码和配置号码各自生成键，供引擎比对且避免号码进入快照。 */
 fun orderIdentity(number: String): String =
@@ -30,7 +33,8 @@ data class DeviceSnapshot(
 /** 一次观察的三种结果。Ready 仍要经过引擎的来源和目标核对，不能直接写成卡片快照。 */
 sealed interface DeviceResponse {
     data class Ready(val snapshot: DeviceSnapshot) : DeviceResponse
-    data class NeedsUser(val message: String) : DeviceResponse
+    data class NeedsUser(val message: String, val missingCapability: PhoneCapability? = null,
+        val mealMenu: com.life0423.carddock.core.rule.MealMenu? = null) : DeviceResponse
     data class Failed(val message: String) : DeviceResponse
 }
 

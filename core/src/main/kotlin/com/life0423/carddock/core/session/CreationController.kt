@@ -1,5 +1,9 @@
 package com.life0423.carddock.core.session
 
+import com.life0423.carddock.core.port.DeviceResponse
+
+import com.life0423.carddock.core.model.DisplayField
+import com.life0423.carddock.core.model.displayFields
 import com.life0423.carddock.core.model.PickupEntry
 import com.life0423.carddock.core.engine.EngineResult
 import com.life0423.carddock.core.engine.RuleEngine
@@ -42,7 +46,8 @@ internal class CreationController(
     private val notify: (String) -> Unit,
     private val library: TemplateLibrary,
     private val discover: (suspend (String, Boolean) -> DiscoveryResult?)?,
-    private val verifyPickup: suspend (PickupEntry) -> String?,
+    private val verifyPickup: suspend (PickupEntry) -> DeviceResponse.NeedsUser?,
+    private val verifyPickupList: suspend () -> DeviceResponse.NeedsUser?,
 ) {
     private val mutableDraft = MutableStateFlow<CreationDraft?>(null)
     val draft = mutableDraft.asStateFlow()
@@ -69,7 +74,7 @@ internal class CreationController(
         val candidate = if (edit != null) edit.candidate else entry?.published
         open(candidate)
         mutableDraft.value = checkNotNull(draft.value).copy(
-            personalTemplateId = entry?.id ?: newId(),
+            personalTemplateId = entry?.id ?: newId(), preferredTheme = edit?.theme ?: candidate?.theme,
             prompt = edit?.prompt ?: candidate?.examplePrompt.orEmpty(),
             title = edit?.title ?: candidate?.title.orEmpty(),
             description = edit?.description ?: candidate?.description.orEmpty(),
@@ -81,19 +86,36 @@ internal class CreationController(
         val current = draft.value ?: return
         if (current.phase.isBusy() || current.ruleChangeCard != null) return
         mutableDraft.value = current.copy(
-            template = template, prompt = template.examplePrompt, demonstrations = emptyList(),
-            title = current.title.ifBlank { template.title },
-            description = current.description.ifBlank { template.description },
+            // 确认理解方案时保留本人原话；主动从示例起步时才填入示例需求。
+            template = template.copy(theme = current.preferredTheme ?: template.theme), prompt = if (template in current.plans ||
+                (current.template?.id == template.id && template.rule.monitorComparison != null)) current.prompt else template.examplePrompt,
+            demonstrations = emptyList(), plans = emptyList(), mealMenu = null,
+            title = current.title.takeUnless { it == current.template?.title }.orEmpty().ifBlank { template.title },
+            description = current.description.takeUnless { it == current.template?.description }.orEmpty().ifBlank { template.description },
             modelCandidate = false, orderNumber = "", routeOid = "",
             phase = RunPhase.IDLE, preview = null, message = "",
         )
     }
 
     /** 变更展示只更新模板布局，试运行仍用完整的原始规则读取设备。 */
+    fun changeTheme(theme: com.life0423.carddock.core.model.CardTheme?) {
+        val current = draft.value ?: return
+        val template = current.template ?: return
+        if (!current.phase.isBusy()) mutableDraft.value = current.copy(preferredTheme = theme, template = template.copy(theme = theme))
+    }
+
     fun changeDisplayFields(fields: List<com.life0423.carddock.core.model.DisplayField>) {
         val current = draft.value ?: return
         val template = current.template ?: return
-        if (current.phase.isBusy() || current.personalTemplateId == null || fields == template.display) return
+        if (current.phase.isBusy() || current.ruleChangeCard != null || fields == template.display) return
+        val verified = current.preview?.displayFields(template.display)?.map { DisplayField(it.key, it.label) }
+        if (current.phase == RunPhase.SUCCEEDED && verified != null &&
+            fields.size == verified.size && fields.toSet() == verified.toSet()) {
+            // 只调整同一批已核验字段的顺序，无需再次访问来源应用。
+            mutableDraft.value = current.copy(template = template.copy(display = fields))
+            return
+        }
+        if (current.personalTemplateId == null) return
         mutableDraft.value = current.copy(template = template.copy(display = fields),
             phase = RunPhase.IDLE, preview = null, message = "")
     }
@@ -119,6 +141,16 @@ internal class CreationController(
         )
     }
 
+    /** 用户在试查过程中停止时保留本次需求和模板，可继续编辑或保存草稿。 */
+    fun cancelTrial() {
+        val current = draft.value ?: return
+        if (!current.phase.isBusy() || current.saving) return
+        generation += 1
+        work?.cancel()
+        work = null
+        mutableDraft.value = current.copy(phase = RunPhase.IDLE, preview = null, message = "试查已取消。")
+    }
+
     /** 取消试运行并作废其代际。持久化进行时保留编辑器，直到写入完成。 */
     fun close() {
         if (draft.value?.saving == true) return
@@ -133,7 +165,7 @@ internal class CreationController(
         val current = draft.value ?: return
         if (current.phase.isBusy() || current.ruleChangeCard != null) return
         mutableDraft.value = current.copy(
-            prompt = prompt.take(500), demonstrations = emptyList(),
+            prompt = prompt.take(500), demonstrations = emptyList(), plans = emptyList(), mealMenu = null,
             title = current.title.takeUnless { it == current.template?.title }.orEmpty(),
             description = current.description.takeUnless { it == current.template?.description }.orEmpty(),
             orderNumber = "",
@@ -180,7 +212,7 @@ internal class CreationController(
         val token = generation
         if (current.modelCandidate && !generate && current.template == null) return
         mutableDraft.value = current.copy(
-            demonstrations = emptyList(), phase = RunPhase.QUEUED, preview = null,
+            demonstrations = emptyList(), plans = emptyList(), mealMenu = null, missingCapability = null, phase = RunPhase.QUEUED, preview = null,
             template = if (generate) null else current.template,
             modelCandidate = current.modelCandidate || generate,
             message = if (generate) "正在生成菜鸟候选…" else "正在匹配模板…",
@@ -211,7 +243,15 @@ internal class CreationController(
                                 message = if (found.choices.any { c -> c.template.pickupEntry != null }) "请选择要示范的官方亮码入口。" else "页面中有多个数量。请按来源页面的显示顺序示范一次，点选要读取的字段。") }
                             return@launch
                         }
-                        is DiscoveryResult.Incomplete -> compiled = CompileResult.Unsupported(found.reason)
+                        is DiscoveryResult.Plans -> {
+                            edit(token) { it.copy(phase = RunPhase.NEEDS_USER, plans = found.choices, message = found.question) }
+                            return@launch
+                        }
+                        is DiscoveryResult.Incomplete -> {
+                            edit(token) { it.copy(phase = if (found.missingCapability == null) RunPhase.FAILED else RunPhase.NEEDS_USER,
+                                message = found.reason, missingCapability = found.missingCapability) }
+                            return@launch
+                        }
                         null -> Unit
                     }
                 }
@@ -221,13 +261,13 @@ internal class CreationController(
                     }
                     is CompileResult.Success -> {
                         edit(token) { it.copy(
-                            template = compiled.template,
+                            template = compiled.template.copy(theme = current.preferredTheme ?: compiled.template.theme),
                             title = it.title.ifBlank { compiled.template.title },
                             description = it.description.ifBlank { compiled.template.description },
                             message = "等待设备操作通道",
                         ) }
-                        if (generate || (prepare && observed == null)) {
-                            edit(token) { it.copy(phase = RunPhase.IDLE, message = "候选已生成，请确认后试运行。") }
+                        if (generate || (prepare && compiled.template.requiresOrderNumber && current.orderNumber.isBlank())) {
+                            edit(token) { it.copy(phase = RunPhase.IDLE, message = if (generate) "候选已生成，请确认后试运行。" else "请选择本机订单后试运行。") }
                             return@launch
                         }
                         val target = if (compiled.template.requiresOrderNumber) {
@@ -245,17 +285,25 @@ internal class CreationController(
                             // 排队等锁期间可能已被关闭。拿到锁后再检查，避免把取消写成一次读取。
                             ensureActive()
                             edit(token) { it.copy(phase = RunPhase.RUNNING, message = "正在读取页面…") }
+                            if (compiled.template.opensPickupList) {
+                                edit(token) { it.copy(message = "正在后台核验菜鸟待取列表…") }
+                                val missing = verifyPickupList()
+                                if (missing != null) {
+                                    edit(token) { it.copy(phase = RunPhase.NEEDS_USER, message = missing.message, missingCapability = missing.missingCapability) }
+                                    return@launch
+                                }
+                            }
                             compiled.template.pickupEntry?.let { entry ->
                                 edit(token) { it.copy(message = "正在从菜鸟首页独立核验亮码入口…") }
                                 repeat(if (current.personalTemplateId == null) 1 else 2) {
                                     val missing = verifyPickup(entry)
                                     if (missing != null) {
-                                        edit(token) { it.copy(phase = RunPhase.NEEDS_USER, message = missing) }
+                                        edit(token) { it.copy(phase = RunPhase.NEEDS_USER, message = missing.message, missingCapability = missing.missingCapability) }
                                         return@launch
                                     }
                                 }
                             }
-                            val result = engine.execute(compiled.template.rule, ReadOptions(localTarget = target, requestedAt = discovery?.cutoff, compareFilter = compareFilter)) { progress ->
+                            val result = engine.execute(compiled.template.rule, ReadOptions(localTarget = target, openMealPage = true, requestedAt = discovery?.cutoff, compareFilter = compareFilter)) { progress ->
                                 edit(token) { it.copy(message = progress.message) }
                             }
                             ensureActive()
@@ -272,6 +320,7 @@ internal class CreationController(
                                     )
                                     is EngineResult.NeedsUser -> it.copy(
                                         phase = RunPhase.NEEDS_USER, template = it.template.takeIf { observed == null }, message = result.message,
+                                        missingCapability = result.missingCapability, mealMenu = result.mealMenu,
                                     )
                                     is EngineResult.Failure -> it.copy(
                                         phase = RunPhase.FAILED, template = it.template.takeIf { observed == null }, message = result.message,
@@ -324,6 +373,7 @@ internal class CreationController(
                     rule = template.rule, snapshot = preview, run = run,
                     localTarget = if (template.requiresOrderNumber) LocalTarget(current.orderNumber, current.routeOid.ifBlank { null }) else null,
                     sourceTemplateId = template.id, sourceTemplateRevision = template.revision, display = template.display, pickupEntry = template.pickupEntry,
+                    opensPickupList = template.opensPickupList, theme = template.theme,
                 )
             if (cards.update { existing ->
                     if (original == null) existing + card
@@ -368,7 +418,7 @@ internal class CreationController(
                     published = checkNotNull(candidate).copy(id = id, title = title, description = description,
                         revision = (previous.published?.revision ?: 0) + 1),
                     edit = null,
-                ) else previous.copy(edit = TemplateEdit(title, description, candidate, current.prompt))
+                ) else previous.copy(edit = TemplateEdit(title, description, candidate, current.prompt, current.preferredTheme ?: candidate?.theme))
                 if (previous in list) list.map { if (it.id == id) next else it } else list + next
             }
             if (saved) {

@@ -9,6 +9,7 @@ data class TemplateEdit(
     val description: String,
     val candidate: TemplateDefinition?,
     val prompt: String? = null,
+    val theme: CardTheme? = null,
 )
 
 @Serializable

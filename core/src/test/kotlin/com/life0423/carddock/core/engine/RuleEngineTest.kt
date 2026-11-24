@@ -135,12 +135,13 @@ class RuleEngineTest {
 
     @Test
     fun requiredUserInterventionIsNotReportedAsSuccessOrOrdinaryFailure() = runBlocking {
-        val device = respondingWith(DeviceResponse.NeedsUser("请先完成演示接管"))
+        val missing = com.life0423.carddock.core.model.PhoneCapability.PAGE_READER
+        val device = respondingWith(DeviceResponse.NeedsUser("开启页面读取", missing))
         var clockCalled = false
 
         val result = RuleEngine(device, now = { clockCalled = true; 10L }).execute(validRule())
 
-        assertEquals(EngineResult.NeedsUser("请先完成演示接管"), result)
+        assertEquals(EngineResult.NeedsUser("开启页面读取", missing), result)
         assertFalse(clockCalled)
     }
 

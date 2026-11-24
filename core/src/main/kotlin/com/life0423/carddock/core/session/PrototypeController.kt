@@ -1,5 +1,8 @@
 package com.life0423.carddock.core.session
 
+import com.life0423.carddock.core.port.DeviceResponse
+
+import com.life0423.carddock.core.model.ticketFace
 import com.life0423.carddock.core.model.PickupEntry
 import com.life0423.carddock.core.engine.RuleEngine
 import com.life0423.carddock.core.model.CardRecord
@@ -42,16 +45,17 @@ class PrototypeController(
     private val replacementTemplate: ((CardRecord, List<CardRecord>, Boolean) -> TemplateDefinition?)? = null,
     templateStore: TemplateStore? = null,
     personalCompiler: RuleCompiler = compiler,
-    verifyPickup: suspend (PickupEntry) -> String? = { "本机无法核验亮码入口。" },
+    verifyPickup: suspend (PickupEntry) -> DeviceResponse.NeedsUser? = { DeviceResponse.NeedsUser("本机无法核验亮码入口。") },
     discover: (suspend (String, Boolean) -> com.life0423.carddock.core.port.DiscoveryResult?)? = null,
+    verifyPickupList: suspend () -> DeviceResponse.NeedsUser? = { DeviceResponse.NeedsUser("本机无法核验菜鸟待取列表。") },
+    // 试运行、卡片刷新和从卡片打开目的页共用设备通道。
+    private val lane: Mutex = Mutex(),
 ) {
     private val notice = MutableStateFlow<String?>(null)
     private val scenario = MutableStateFlow(DemoScenario.NORMAL)
     // 构造属性按顺序初始化，runs 这时还不存在。查找放到 init，initialize 只会在构造完成之后调用。
     private var liveJob: (String) -> Boolean = { false }
     private val cards = CardCollection(store, ::notify, now) { liveJob(it) }
-    // 试运行和卡片刷新共用这一把锁，同一时刻只有一次设备读取。
-    private val lane = Mutex()
     private val runs = RunCoordinator(cards, engine, lane, scope, now, newId)
 
     init {
@@ -59,7 +63,7 @@ class PrototypeController(
     }
 
     private val library = TemplateLibrary(templateStore)
-    private val creator = CreationController(compiler, personalCompiler, modelCompiler, engine, cards, lane, scope, now, newId, ::notify, library, discover, verifyPickup)
+    private val creator = CreationController(compiler, personalCompiler, modelCompiler, engine, cards, lane, scope, now, newId, ::notify, library, discover, verifyPickup, verifyPickupList)
     private val editorState = combine(creator.draft, library.state, ::Pair)
     private val sequence = MutableStateFlow<SequenceStatus?>(null)
     private var sequenceJob: Job? = null
@@ -74,7 +78,7 @@ class PrototypeController(
         PrototypeState(
             loading = collection.loading, cards = collection.cards, templates = templates,
             draft = editor.first, scenario = selectedScenario, notice = message, sequence = runningSequence,
-            personalTemplates = editor.second,
+            personalTemplates = editor.second, cardsReadable = collection.readable,
         )
     }.stateIn(scope, SharingStarted.Eagerly, PrototypeState(templates = templates))
 
@@ -85,6 +89,24 @@ class PrototypeController(
             if (!resetting && !cards.state.value.loading && sequence.value == null) creator.openTemplateEditor(id)
         },
         chooseDraftTemplate = creator::chooseTemplate,
+        setCardPrimary = { id, key -> scope.launch {
+            // 只写布局，成功快照、核验时间和原模板仍由各自的流程管理。
+            cards.update { list -> list.map { card ->
+                if (card.id != id) card else {
+                    val face = card.snapshot?.ticketFace(card.display, card.rule)
+                    if (face == null || face.fields.none { it.key == key }) card
+                    else card.copy(display = face.primaryFirst(key))
+                }
+            } }
+        } },
+        editReminder = { id, plan -> scope.launch {
+            cards.update { list -> list.map { card ->
+                if (card.id == id && card.rule.localReminder != null)
+                    card.copy(rule = card.rule.copy(localReminder = plan), snapshot = null, run = null)
+                else card
+            } }
+        } },
+        changeTheme = creator::changeTheme,
         changeDisplayFields = creator::changeDisplayFields,
         changeTemplateDescription = creator::changeDescription,
         keepTemplateDraft = { creator.saveTemplate(verified = false) },
@@ -94,6 +116,7 @@ class PrototypeController(
         changeRouteOid = creator::changeRouteOid,
         changeOrderNumber = creator::changeOrderNumber,
         demonstrateField = { creator.trial(demonstration = it) },
+        cancelTrial = creator::cancelTrial,
         prepareTemplate = { creator.trial(prepare = true) },
         compareFilterForTrial = {
             val draft = creator.draft.value
@@ -161,7 +184,22 @@ class PrototypeController(
         if (!resetting && !cards.state.value.loading && sequence.value == null) creator.open(template, model = true)
     }
 
+    /** 系统任务只取消自己开启的刷新。人工操作占用这张卡时由系统稍后重试。 */
+    suspend fun refreshStoredCard(id: String, onVerified: (CardRecord) -> Unit = {}): Boolean {
+        if (resetting || sequence.value != null || runs.hasLiveJob(id)) return false
+        val previousRun = cards.find(id)?.run?.id
+        val job = runs.start(id) ?: return true
+        try {
+            job.join()
+        } finally { if (job.isActive) job.cancel() }
+        val card = cards.find(id) ?: return true
+        if (card.run?.phase != RunPhase.SUCCEEDED || card.run.id == previousRun) return false
+        onVerified(card)
+        return true
+    }
+
     /** 手动切页项由用户确认开始；完成、超时或取消当前项后才推进。 */
+
     private fun refreshSequence(ids: List<String>) {
         if (resetting || sequenceJob?.isCompleted == false || creator.draft.value != null ||
             cards.state.value.cards.any { runs.hasLiveJob(it.id) }) return
@@ -196,6 +234,27 @@ class PrototypeController(
         initialized = true
         if (!library.initialize()) notify("无法载入个人模板。请保留原文件并重试启动。")
         cards.initialize(initialCards())
+    }
+
+    /** 先导入模板，再追加空间卡；重复导入跳过已有 ID，部分成功后可用同一文件继续。 */
+    suspend fun importPersonal(archive: PersonalArchive): String {
+        if (resetting || cards.state.value.loading || !cards.state.value.readable) return "本机卡片尚不可写，请在数据正常载入后再导入。"
+        var addedTemplates = 0
+        if (archive.templates.isNotEmpty() && !library.update { existing ->
+            val next = archive.templates.filterNot { incoming -> existing.any { it.id == incoming.id } }
+            addedTemplates = next.size
+            existing + next
+        }) return "模板未能写入，可用同一文件重试。"
+        var addedCards = 0
+        if (archive.cards.isNotEmpty() && !cards.update { existing ->
+            val next = archive.cards.filterNot { incoming -> existing.any { it.id == incoming.id } }.map { card ->
+                val parent = library.state.value.find { it.id == card.sourceTemplateId }?.published
+                if (parent == null || parent.rule != card.rule) card.copy(sourceTemplateId = null, sourceTemplateRevision = null) else card
+            }
+            addedCards = next.size
+            existing + next
+        } && addedCards > 0) return "已导入 ${addedTemplates} 个模板，卡片未能写入。可用同一文件重试。"
+        return "已新增 ${addedTemplates} 个模板、${addedCards} 张卡片。"
     }
 
     /** 前两张模板作为种子，不带快照，界面上是待运行。 */

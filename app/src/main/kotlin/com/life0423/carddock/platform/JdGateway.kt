@@ -1,5 +1,7 @@
 package com.life0423.carddock.platform
 
+import com.life0423.carddock.core.model.PhoneCapability
+
 import android.content.ClipboardManager
 import android.content.Context
 import com.life0423.carddock.core.model.AppPrice
@@ -58,7 +60,7 @@ internal class JdGateway(
         val product = JdProduct.entries.firstOrNull { it.sku == target }
             ?: return DeviceResponse.Failed("京东商品不在本地核验模板中。")
         val captured = if (appPrice) {
-            if (!connected()) return DeviceResponse.NeedsUser("请先在“我的”开启无障碍读取。")
+            if (!connected()) return DeviceResponse.NeedsUser("请先开启页面读取。", PhoneCapability.PAGE_READER)
             capture(product, checkNotNull(requestedAt))
                 ?: return DeviceResponse.NeedsUser("未核验展示价。请打开匹配商品详情、关闭浮窗、复制本次分享链接并返回。")
         } else null

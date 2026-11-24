@@ -1,6 +1,7 @@
 package com.life0423.carddock.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,7 +33,8 @@ internal fun SquareScreen(store: SquareStore?, state: SquareState, personal: Lis
     }
     var query by rememberSaveable { mutableStateOf("") }
     var latest by rememberSaveable { mutableStateOf(false) }
-    var preview by remember { mutableStateOf<TemplateDefinition?>(null) }
+    var reviewedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var submitted by rememberSaveable { mutableStateOf(false) }
     var unpublish by remember { mutableStateOf<SquareEntry?>(null) }
     LaunchedEffect(store) {
         store.state.first { !it.busy }
@@ -106,35 +108,56 @@ internal fun SquareScreen(store: SquareStore?, state: SquareState, personal: Lis
     }
     if (upload) {
         val choices = personal.mapNotNull { it.published }.filter(store::canPublish)
+        val template = choices.firstOrNull { it.id == reviewedId }
+        val posted = submitted && !state.busy && state.message?.startsWith("模板已发布") == true
+        val close = { reviewedId = null; submitted = false; closeUpload() }
         AlertDialog(
-            onDismissRequest = { closeUpload() },
-            title = { Text("选择已核验模板") },
+            onDismissRequest = { if (!state.busy || !submitted) close() },
+            containerColor = DockColors.Surface,
+            title = { Text(when { posted -> "发布完成"; template != null -> "公开内容预览"; else -> "上传模板" }) },
             text = {
-                if (choices.isEmpty()) Text("请先到「模板」创建并核验可公开的模板。")
-                else LazyColumn(Modifier.heightIn(max = 320.dp)) {
-                    itemsIndexed(choices, key = { _, template -> template.id }) { _, template ->
-                        TextButton({ closeUpload(); preview = template }, Modifier.fillMaxWidth()) { Text(template.title) }
+                Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FlowSteps(listOf("选模板", "公开预览", "发布"), if (posted) 2 else if (template != null) 1 else 0)
+                    if (posted) Text(checkNotNull(state.message))
+                    else if (template == null) {
+                        if (choices.isEmpty()) Text("暂无可公开的已核验模板")
+                        choices.forEach { choice ->
+                            TemplateRow(choice.title, choice.description, choice, true, "选择",
+                                { reviewedId = choice.id; submitted = false }, "upload_${choice.id}")
+                        }
+                        val local = personal.count { it.published != null } - choices.size
+                        if (local > 0) Text("另有 ${local} 份模板仅限本机使用", color = DockColors.Muted)
+                    } else {
+                        Surface(shape = RoundedCornerShape(16.dp), color = DockColors.Ticket) {
+                            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                KindIcon(template.kind, template.rule, theme = template.theme)
+                                Text(template.title, style = MaterialTheme.typography.titleLarge)
+                                Text("第 ${template.revision} 版 · ${state.account.orEmpty()}")
+                            }
+                        }
+                        Text(template.description)
+                        val labels = template.display.map { it.label }.ifEmpty {
+                            template.rule.steps.filterIsInstance<com.life0423.carddock.core.rule.RuleStep.ReadField>().map { it.label }
+                        }
+                        Text("展示字段 · " + labels.joinToString("、"))
+                        Text("发布后其他人可以查看和下载。请检查名称和说明中是否含有个人信息。", color = DockColors.Muted)
+                        if (submitted) {
+                            if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                            else state.message?.let { Text(it, color = DockColors.Error) }
+                        }
                     }
                 }
             },
-            confirmButton = { TextButton({ closeUpload() }) { Text("关闭") } },
-        )
-    }
-    preview?.let { template ->
-        AlertDialog(
-            onDismissRequest = { preview = null },
-            title = { Text("确认公开发布") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(template.title)
-                    if (template.description.isNotBlank()) Text(template.description)
-                    Text("第 ${template.revision} 版 · ${state.account.orEmpty()}")
-                    if (template.display.isNotEmpty()) Text("展示字段 · ${template.display.joinToString("、") { it.label }}")
-                    Text("发布后，其他用户可以看到名称、说明、查询能力和展示字段名。")
+            confirmButton = {
+                if (template == null || posted) TextButton(onClick = close) { Text(if (posted) "完成" else "关闭") }
+                else Button(onClick = { submitted = true; store.publish(template) }, enabled = !state.busy && state.signedIn) {
+                    Text(if (submitted && !state.busy) "重试发布" else "确认发布")
                 }
             },
-            confirmButton = { TextButton({ store.publish(template); preview = null }) { Text("确认发布") } },
-            dismissButton = { TextButton({ preview = null }) { Text("取消") } },
+            dismissButton = { if (template != null && !posted)
+                TextButton(onClick = { reviewedId = null; submitted = false }, enabled = !state.busy) { Text("重选模板") }
+            },
         )
     }
     unpublish?.let { entry ->

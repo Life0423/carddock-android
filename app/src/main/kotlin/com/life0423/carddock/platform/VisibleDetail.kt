@@ -30,13 +30,14 @@ internal data class DetailNode(
     val clickable: Boolean = false,
     val drawingOrder: Int = 0,
     val checked: Boolean = false,
+    val enabled: Boolean = true,
 )
 internal data class DetailWindow(val source: String?, val nodes: List<DetailNode>, val password: Boolean)
-internal data class OrderEvidence(val number: String, val status: String, val time: String)
+internal data class OrderEvidence(val number: String, val status: String, val time: String, val totalCents: Long? = null)
 internal data class JdDetail(val title: String, val variant: String, val price: AppPrice?)
 
 /** 采样采用深度优先编号，父节点在子节点之前。 */
-private fun List<DetailNode>.visibleSubtree(root: Int, includeContainers: Boolean = false): List<IndexedValue<DetailNode>> {
+internal fun List<DetailNode>.visibleSubtree(root: Int, includeContainers: Boolean = false): List<IndexedValue<DetailNode>> {
     val indices = mutableSetOf(root)
     return withIndex().filter { (index, node) ->
         (index == root || node.parent in indices && indices.add(index)) && (node.visible || includeContainers)
@@ -63,7 +64,7 @@ internal fun DetailWindow.hasCollapsedMeituanOrder(): Boolean {
 }
 
 /** 完成状态、订单号和时间必须来自同一个订单详情容器。 */
-internal fun DetailWindow.readOrder(): OrderEvidence? {
+internal fun DetailWindow.readOrder(includeTotal: Boolean = false): OrderEvidence? {
     // 当前 vivo 美团将状态与订单信息放在同一详情列表的不同子项。
     val detail = nodes.indices.singleOrNull { nodes[it].id == "$MEITUAN_PACKAGE:id/q04" }
     if (detail != null) {
@@ -72,7 +73,7 @@ internal fun DetailWindow.readOrder(): OrderEvidence? {
             val rows = nodes.visibleSubtree(list.index, true)
             val header = rows.singleOrNull { it.value.id == "$MEITUAN_PACKAGE:id/c9_" } ?: return null
             val status = nodes.visibleSubtree(header.index, true).singleOrNull { it.value.visible && it.value.label == "订单已完成" } ?: return null
-            return readOrderFields(rows, status.value.label)
+            return readOrderFields(rows, status.value.label, includeTotal)
         }
     }
     val root = nodes.indices.singleOrNull {
@@ -98,10 +99,10 @@ internal fun DetailWindow.readOrder(): OrderEvidence? {
         status = nodes.visibleSubtree(statusBlock.index).singleOrNull { it.value.label == "订单已完成" }?.value?.label
     }
     if (status == null) return null
-    return readOrderFields(if (list != null) nodes.visibleSubtree(list.index) else rows, status)
+    return readOrderFields(if (list != null) nodes.visibleSubtree(list.index) else rows, status, includeTotal)
 }
 
-private fun DetailWindow.readOrderFields(infoContainer: List<IndexedValue<DetailNode>>, status: String): OrderEvidence? {
+private fun DetailWindow.readOrderFields(infoContainer: List<IndexedValue<DetailNode>>, status: String, includeTotal: Boolean): OrderEvidence? {
     val info = infoContainer.singleOrNull { it.value.visible && it.value.label == "订单信息" } ?: return null
     val infoRows = nodes.visibleSubtree(info.value.parent)
     val numberRow = infoRows.singleOrNull { it.value.label == "订单号码" } ?: return null
@@ -109,7 +110,9 @@ private fun DetailWindow.readOrderFields(infoContainer: List<IndexedValue<Detail
         .singleOrNull(orderNumber::matches) ?: return null
     val timeRow = infoRows.singleOrNull { it.value.label == "下单时间" } ?: return null
     val time = nodes.visibleSubtree(timeRow.value.parent).map { it.value.label }.singleOrNull(orderTime::matches) ?: return null
-    return OrderEvidence(number, status, time)
+    // 与已核验订单信息限定在同一详情容器；金额缺失时普通状态卡仍可使用。
+    val total = if (includeTotal) orderSemantics(infoContainer.map { it.value }).orderTotalCents() else null
+    return OrderEvidence(number, status, time, total)
 }
 
 /** 商品身份标签用于监测切换；价格只读同一个详情容器和同一个价格区。 */

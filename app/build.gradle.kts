@@ -20,16 +20,31 @@ android {
         applicationId = "com.life0423.carddock"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-prototype"
+        versionCode = providers.gradleProperty("carddockVersionCode").orNull?.toInt() ?: 1
+        versionName = providers.gradleProperty("carddockVersionName").orNull ?: "0.1.0-prototype"
         resValue("string", "square_endpoint", squareEndpoint ?: "")
     }
 
+    signingConfigs {
+        if (System.getenv("CARDDOCK_BETA_KEYSTORE") != null) create("internalBeta") {
+            storeFile = file(System.getenv("CARDDOCK_BETA_KEYSTORE"))
+            storePassword = System.getenv("CARDDOCK_BETA_PASSWORD")
+            keyAlias = "carddock-beta"
+            keyPassword = storePassword
+        }
+    }
     buildTypes {
         debug {
             // Keep the demo installation separate from a future production app.
             applicationIdSuffix = ".prototype"
             resValue("string", "square_endpoint", squareEndpoint ?: "http://127.0.0.1:8765")
+        }
+        create("beta") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.findByName("internalBeta")
+            versionNameSuffix = "-beta.21"
+            resValue("string", "app_name", "卡坞内测")
+            matchingFallbacks += "release"
         }
         release {
             isMinifyEnabled = false
@@ -57,6 +72,8 @@ kotlin {
 
 dependencies {
     implementation(project(":core"))
+    implementation("com.google.zxing:core:3.5.3")
+    implementation(project(":phone-pairing"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)

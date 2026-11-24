@@ -41,7 +41,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [28], application = Application::class)
 class FixroundCancelledCommitTest {
     /** 只在 finishWrite 成功后让下一次 baseFileHas 无法确认，并取消正在保存的任务。 */
-    private class Hook(base: File) : AtomicFile(base) {
+    private class Hook(base: File) : CollectionFile(base) {
         var enabled = false
         var cannotVerifyOnce = false
         var cancelCreator: (() -> Unit)? = null

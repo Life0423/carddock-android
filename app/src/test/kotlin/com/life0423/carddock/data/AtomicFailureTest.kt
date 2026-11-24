@@ -65,7 +65,7 @@ class AtomicFailureTest {
     private val old = CardRecord("user-card", "用户卡", TemplateKind.EXPRESS, rule)
 
     /** 在真实 AtomicFile 完成 rename 之后，让随后的 openRead 失败或读到别的字节。 */
-    private class FaultAtomic(base: File) : AtomicFile(base) {
+    private class FaultAtomic(base: File) : CollectionFile(base) {
         var failStart = false
         var failRead = false
         var failReadAfterFinish = false

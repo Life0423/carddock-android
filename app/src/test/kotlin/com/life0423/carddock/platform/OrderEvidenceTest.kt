@@ -18,6 +18,15 @@ class OrderEvidenceTest {
     private fun field(label: String, top: Int, selected: Boolean = false) =
         DetailNode(-1, null, "android.widget.TextView", label, true, Rect(10,top,240,top+26), selected = selected)
 
+    /** 合计只接受同一订单中带人民币标记的唯一金额，保留分与零值。 */
+    @Test fun totalCarriesCurrencyAndRejectsConflictingReadings() {
+        assertEquals(3150L, listOf("合计：￥31.50", "合计：¥31.5").orderTotalCents())
+        assertEquals(0L, listOf("合计：¥0.00").orderTotalCents())
+        assertNull(listOf("合计：31.50", "优惠：¥3.50", "合计：USD 3.50").orderTotalCents())
+        assertNull(listOf("合计：¥12.34", "合计:USD 21.34").orderTotalCents())
+        assertNull(listOf("合计：¥12.34", "合计：¥21.34").orderTotalCents())
+    }
+
     @Test fun foregroundListMayStartBelowBackgroundList() {
         val screen = Rect(0, 0, 600, 1000)
         fun area(parent: Int, bounds: Rect, z: Int) = DetailNode(parent, null, null, "", true, bounds, drawingOrder = z)
@@ -172,13 +181,15 @@ class OrderEvidenceTest {
         val cutoff = java.time.ZonedDateTime.parse("2026-03-30T15:00:00+08:00")
         val marker = "下单时间：2026-03-12"
         val detail = listOf("订单已完成","订单类型：外卖","订单号：1000001","下单时间：2026-03-12 09:00:00","合计：￥18.90")
-        suspend fun trial(reportedCount: Int?, withdrawCount: Boolean = false): DeviceResponse {
+        suspend fun trial(reportedCount: Int?, withdrawCount: Boolean = false, totalLabel: String? = null, grouped: Boolean = false, expectsDetail: Boolean = reportedCount != null): DeviceResponse {
             val scan = OrderCollection("sample",cutoff,emptyList())
             val pane = root.copy(parent=0,bounds=Rect(0,160,300,600),scrollable=true,collectionRows=reportedCount)
             val list = DetailWindow("sample",listOf(root,field("全部订单",0).copy(parent=0),
                 field("全部时间",40,true).copy(parent=0),field("外卖",80,true).copy(parent=0),pane,
                 field(marker,180).copy(parent=4),field("已完成",240).copy(parent=4),
-                field("已显示全部订单",360).copy(parent=4)),false)
+                field("已显示全部订单",360).copy(parent=4)) +
+                (if (grouped) listOf(root.copy(parent=4,rowIndex=0,bounds=Rect(0,370,300,450))) else emptyList()) +
+                listOfNotNull(totalLabel?.let { field(it,390).copy(parent=if (grouped) 8 else 4) }),false)
             fun page(labels: List<String>) = DetailWindow("sample",listOf(root) +
                 labels.mapIndexed { i,s -> field(s,40*i).copy(parent=0) },false)
             var view = list
@@ -202,7 +213,7 @@ class OrderEvidenceTest {
                 true
             }
             val first = scan.runWindow({ true },observe,open,{ false },null)
-            if (reportedCount == null) {
+            if (!expectsDetail) {
                 assertSame(list,view) // 无完整性依据时，不打开任何订单或账单。
                 return first
             }
@@ -218,6 +229,11 @@ class OrderEvidenceTest {
         assertTrue(trial(null) is DeviceResponse.NeedsUser)
         assertTrue(trial(2) is DeviceResponse.NeedsUser)
         assertTrue(trial(1,withdrawCount=true) is DeviceResponse.NeedsUser)
+        // 同一试查入口验证显式总数、页内小计以及与集合元数据冲突三种来源。
+        assertTrue(trial(null, totalLabel="订单总数：1笔", expectsDetail=true) is DeviceResponse.Ready)
+        assertTrue(trial(null, totalLabel="订单总数：1笔", grouped=true) is DeviceResponse.NeedsUser)
+        assertTrue(trial(null, totalLabel="本页订单总数：1笔") is DeviceResponse.NeedsUser)
+        assertTrue(trial(1, totalLabel="订单总数：2笔", expectsDetail=false) is DeviceResponse.NeedsUser)
     }
 
     @Test fun countOnlyOnLastPageMustBeReadAgainDuringReconciliation() = runTest {

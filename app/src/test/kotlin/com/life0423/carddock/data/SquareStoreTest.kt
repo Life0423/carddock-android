@@ -1,5 +1,6 @@
 package com.life0423.carddock.data
 
+import com.life0423.carddock.core.model.CardTheme
 import android.app.Application
 import java.net.InetAddress
 import java.net.ServerSocket
@@ -25,7 +26,7 @@ class SquareStoreTest {
     @Test
     fun downloadRequiresServerAcceptanceAndSurvivesListingRefreshFailure() = runBlocking {
         val entry = SquareEntry("12345678-1234-1234-1234-123456789012", "alice", 2,
-            "订单状态", "只显示状态", "meituan-status", 1)
+            "订单状态", "只显示状态", "meituan-status", 1, theme = CardTheme.ORDER)
         val acceptsDownload = AtomicBoolean(false)
         val server = ServerSocket(0, 0, InetAddress.getByName("127.0.0.1"))
         val responder = thread(isDaemon = true) {
@@ -68,6 +69,10 @@ class SquareStoreTest {
             val key = javax.crypto.KeyGenerator.getInstance("AES").apply { init(128) }.generateKey()
             val vault = PrivateCipherFile(java.io.File(context.noBackupFilesDir, "test-session.enc"), "test") { key }
             val store = SquareStore(context, address, this, vault)
+            // 即使查询规则可公开，本机列表交接能力也只保存在个人模板。
+            val standard = com.life0423.carddock.cainiaoEmptyTemplate
+            assertTrue(store.canPublish(standard))
+            assertTrue(!store.canPublish(standard.copy(opensPickupList = true)))
             withTimeout(5000) { store.state.first { !it.busy } }
             store.signIn("bob", "test-password", false)
             assertTrue(withTimeout(5000) { store.state.first { !it.busy } }.signedIn)

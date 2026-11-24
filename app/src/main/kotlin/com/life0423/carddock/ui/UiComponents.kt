@@ -1,5 +1,9 @@
 package com.life0423.carddock.ui
 
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.life0423.carddock.R
+import com.life0423.carddock.core.rule.RuleSpec
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -38,46 +42,14 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-internal fun TemplateKind.icon(): ImageVector = when (this) {
-    TemplateKind.EXPRESS -> DockIcons.Inventory2
-    TemplateKind.DELIVERY -> DockIcons.LocalShipping
-    TemplateKind.TRAVEL -> DockIcons.Train
-    TemplateKind.QUERY -> Icons.Rounded.Search
-    TemplateKind.REMINDER -> Icons.Rounded.Notifications
-    TemplateKind.SHOPPING -> Icons.Rounded.ShoppingCart
-}
-
-internal fun TemplateKind.accent(): Color = when (this) {
-    TemplateKind.EXPRESS -> DockColors.Amber
-    TemplateKind.DELIVERY -> DockColors.Mint
-    TemplateKind.TRAVEL -> DockColors.Blue
-    TemplateKind.QUERY, TemplateKind.REMINDER -> DockColors.Mint
-    TemplateKind.SHOPPING -> DockColors.Mint
-}
-
-/** 页面主操作共用薄荷绿填充和最小高度，字体放大时仍可自然增高。 */
+/** 页面主操作共用朱红填充和最小高度，字体放大时仍可自然增高。 */
 @Composable
 internal fun DockPrimaryAction(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
     Button(onClick, modifier = modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = enabled,
         shape = RoundedCornerShape(14.dp)) { Text(label) }
 }
 
-@Composable
-internal fun KindIcon(kind: TemplateKind, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier.size(34.dp),
-        color = kind.accent().copy(alpha = 0.12f),
-        shape = RoundedCornerShape(13.dp),
-    ) {
-        Icon(
-            imageVector = kind.icon(),
-            contentDescription = null,
-            tint = kind.accent(),
-            modifier = Modifier.padding(7.dp),
-        )
-    }
-}
-
+/** 将运行阶段转换为票面状态。 */
 internal fun RunPhase.label(): String = when (this) {
     RunPhase.IDLE -> "待运行"
     RunPhase.QUEUED -> "排队中"
@@ -95,7 +67,7 @@ internal fun RunPhase.isBusy(): Boolean = this == RunPhase.RUNNING || this == Ru
 @Composable
 internal fun StatusBadge(phase: RunPhase) {
     val color = when (phase) {
-        RunPhase.SUCCEEDED -> DockColors.Mint
+        RunPhase.SUCCEEDED -> DockColors.Sage
         RunPhase.RUNNING, RunPhase.QUEUED, RunPhase.NEEDS_USER -> DockColors.Amber
         RunPhase.FAILED -> DockColors.Error
         else -> DockColors.Muted
@@ -140,8 +112,12 @@ internal fun SnapshotFields(fields: List<FieldValue>, modifier: Modifier = Modif
 }
 
 /** 用设备默认时区和简体中文格式显示。同一毫秒在不同时区会显示成不同的钟点。 */
-internal fun formatTimestamp(epochMillis: Long): String =
-    SimpleDateFormat("MM月dd日 HH:mm:ss", Locale.SIMPLIFIED_CHINESE).format(Date(epochMillis))
+internal fun formatTimestamp(epochMillis: Long, includeYear: Boolean = false): String =
+    SimpleDateFormat(if (includeYear) "yyyy-MM-dd HH:mm:ss" else "MM月dd日 HH:mm:ss", Locale.SIMPLIFIED_CHINESE).format(Date(epochMillis))
+
+/** 空间卡将日期与实际核验时分秒放在同一行，连续刷新也能区分。 */
+internal fun cardDate(epochMillis: Long): String =
+    SimpleDateFormat("M/d HH:mm:ss", Locale.SIMPLIFIED_CHINESE).format(Date(epochMillis))
 
 /** 两个并列视图的选择，选中状态也提供给无障碍服务。 */
 @Composable

@@ -127,7 +127,7 @@ class AtomicFileCardStoreRaceTest {
         private val role: String,
         private val storeA: AtomicFileCardStore,
         private val storeB: AtomicFileCardStore,
-    ) : AtomicFile(base) {
+    ) : CollectionFile(base) {
         override fun finishWrite(stream: FileOutputStream?) {
             super.finishWrite(stream)
             if (role != "A") return

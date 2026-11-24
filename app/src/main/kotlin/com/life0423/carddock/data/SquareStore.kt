@@ -44,9 +44,10 @@ internal data class SquareEntry(
     val capability: String,
     val downloads: Int,
     val display: List<DisplayField> = emptyList(),
+    val theme: com.life0423.carddock.core.model.CardTheme? = null,
 ) {
     fun definition(): TemplateDefinition = publicCapabilities.getValue(capability)
-        .copy(id = id, title = title, description = description, revision = version, display = display)
+        .copy(id = id, title = title, description = description, revision = version, display = display, theme = theme)
 }
 
 internal data class SquareState(
@@ -118,6 +119,15 @@ internal class SquareStore(context: Context, url: String, private val scope: Cor
         }
     }
 
+    /** 服务端以当前密码确认注销；只清理这个账号在此设备的广场副本。 */
+    fun deleteAccount(password: String) = operate {
+        val name = session?.name ?: return@operate
+        request("/account/delete", buildJsonObject { put("current", password) }.toString())
+        preferences.edit().remove(profileKey("favorites")).remove(profileKey("installed")).apply()
+        clearSession()
+        mutableState.value = state.value.copy(entries = state.value.entries.filterNot { it.author == name }, message = "账号已注销")
+    }
+
     fun loadPublications() = operate {
         val entries = Json.decodeFromString<List<SquareEntry>>(request("/account/templates"))
         mutableState.value = state.value.copy(publications = entries.map { it.validated() })
@@ -144,6 +154,7 @@ internal class SquareStore(context: Context, url: String, private val scope: Cor
             put("title", template.title)
             put("description", template.description)
             put("capability", capability)
+            template.theme?.let { put("theme", it.name) }
             if (template.display.isNotEmpty()) put("display", Json.encodeToJsonElement(template.display))
         }
         request("/templates", body = content.toString())
@@ -205,7 +216,7 @@ internal class SquareStore(context: Context, url: String, private val scope: Cor
         preferences.getString(profileKey(list), null)?.let { Json.decodeFromString<List<SquareEntry>>(it) }.orEmpty()
 
     private fun capability(template: TemplateDefinition): String? = publicCapabilities.entries.firstOrNull { (_, standard) ->
-        template.pickupEntry == null && template.requiresOrderNumber == standard.requiresOrderNumber &&
+        template.rule.officialAction == null && !template.opensPickupList && template.pickupEntry == null && template.requiresOrderNumber == standard.requiresOrderNumber &&
             template.rule.copy(id = standard.rule.id) == standard.rule
     }?.key
 
@@ -271,6 +282,7 @@ internal class SquareStore(context: Context, url: String, private val scope: Cor
             connection.readTimeout = 5_000
             connection.instanceFollowRedirects = false
             connection.setRequestProperty("X-CardDock-Display", "1")
+            connection.setRequestProperty("X-CardDock-Theme", "1")
             try {
                 credential?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
                 if (body != null) {

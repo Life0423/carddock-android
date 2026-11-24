@@ -42,6 +42,23 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class)
 class NativeSourcesTest {
+    /** 详情意图只提供已实现的列表，无对象绑定。状态查询及复合操作分别留在原有分支。 */
+    @Test fun pickupNavigationPreservesQueryAndCodeIntents() = runTest {
+        for (request in listOf("在菜鸟打开我选的待取包裹", "请帮我查看菜鸟待取包裹列表", "打开菜鸟包裹详情")) {
+            val template = (PersonalRuleCompiler.compile(request) as CompileResult.Success).template
+            assertTrue(template.opensPickupList)
+            assertNull(template.pickupEntry)
+            assertEquals("进入菜鸟后选择包裹", template.description)
+        }
+        val query = (PersonalRuleCompiler.compile("查看菜鸟待取包裹") as CompileResult.Success).template
+        assertFalse(query.opensPickupList)
+        assertEquals(pickupStatusTemplate.rule, query.rule)
+        val empty = (PersonalRuleCompiler.compile("核验菜鸟暂无待取包裹") as CompileResult.Success).template
+        assertEquals(cainiaoEmptyTemplate.rule, empty.rule)
+        assertTrue(PersonalRuleCompiler.compile("打开菜鸟快递") is CompileResult.Unsupported)
+        assertTrue(PersonalRuleCompiler.compile("打开菜鸟待取列表并转发") is CompileResult.Unsupported)
+    }
+
     @Test fun personalDemandBuildsAStatusOnlyRule() = runTest {
         val candidate = PersonalRuleCompiler.compile("只显示美团订单状态") as CompileResult.Success
         assertTrue(candidate.template.requiresOrderNumber)
@@ -97,7 +114,7 @@ class NativeSourcesTest {
         var window = DetailWindow(MEITUAN_PACKAGE, emptyList(), false)
         val meituan = MeituanGateway({ true }, { window })
         val engine = RuleEngine(object : DeviceGateway {
-            override suspend fun inspect(sourceId: String, targetKey: String) = meituan.inspect()
+            override suspend fun inspect(sourceId: String, targetKey: String) = meituan.inspect(includeTotal = targetKey == orderTotalTemplate.rule.targetKey)
         })
         val rule = meituanTemplate.rule
         for ((root, header, list) in listOf(Triple("ifs", "r19", null), Triple("ii7", "sur", "kr1"))) {
@@ -121,6 +138,16 @@ class NativeSourcesTest {
             assertEquals(listOf("订单已完成", "2026-01-02 12:34:56"), good.snapshot.fields.map { it.value })
             assertEquals("TARGET_MISMATCH",
                 (engine.execute(rule, ReadOptions(LocalTarget("0001234567890123457"))) as EngineResult.Failure).code)
+            // 只有本订单详情内的合计可用于金额卡。外层推荐商品的价格不属于本次快照。
+            val box = android.graphics.Rect(0, 30, 120, 60)
+            val total = row(3, "合计：¥12.50").copy(bounds = box)
+            val outside = row(-1, "合计：¥8.00").copy(bounds = box)
+            window = window.copy(nodes = nodes + total + outside)
+            val amountRule = (PersonalRuleCompiler.compile("查看美团历史订单的合计金额") as CompileResult.Success).template.rule
+            val amount = engine.execute(amountRule, ReadOptions(LocalTarget(sample))) as EngineResult.Success
+            assertEquals(listOf("¥12.50", "人民币（CNY）", "2026-01-02 12:34:56", "订单已完成"), amount.snapshot.fields.map { it.value })
+            window = window.copy(nodes = nodes + outside)
+            assertTrue(engine.execute(amountRule, ReadOptions(LocalTarget(sample))) is EngineResult.NeedsUser)
             window = window.copy(nodes = nodes.dropLast(1))
             assertTrue(engine.execute(rule, ReadOptions(LocalTarget(sample))) is EngineResult.NeedsUser)
             window = window.copy(nodes = nodes.mapIndexed { index, node -> if (index == 9) node.copy(parent = 3) else node })

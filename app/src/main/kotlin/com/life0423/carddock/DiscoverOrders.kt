@@ -33,7 +33,7 @@ internal suspend fun discoverOrders(context: Context, settings: ModelSettings, d
     when (result) {
         is DeviceResponse.Ready -> DiscoveryResult.Found(DiscoveredTemplate(monthlyTemplate(source,demand,scan.steps.toList()),
             result.snapshot.fields,cutoff,scan.digest))
-        is DeviceResponse.NeedsUser -> DiscoveryResult.Incomplete(result.message)
+        is DeviceResponse.NeedsUser -> DiscoveryResult.Incomplete(result.message, result.missingCapability)
         is DeviceResponse.Failed -> DiscoveryResult.Incomplete(result.message)
     }
 }

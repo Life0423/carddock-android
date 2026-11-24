@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 internal data class CardCollectionState(
     val loading: Boolean = true,
     val cards: List<CardRecord> = emptyList(),
+    val readable: Boolean = true,
 )
 
 /**
@@ -32,7 +33,6 @@ internal class CardCollection(
     private val lock = Mutex()
     private val mutableState = MutableStateFlow(CardCollectionState())
     val state = mutableState.asStateFlow()
-    private var readable = true
 
     /**
      * 启动时加载。load 返回 null 表示没有文件，用 [initialCards] 创建。
@@ -44,8 +44,7 @@ internal class CardCollection(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            readable = false
-            mutableState.value = CardCollectionState(loading = false)
+            mutableState.value = CardCollectionState(loading = false, readable = false)
             notify("本地演示数据无法读取，原文件未覆盖。可在“我的”中重置演示。")
             return@withLock
         }
@@ -74,7 +73,7 @@ internal class CardCollection(
      * 读回内容与本次要写的列表相同则返回 true。取消会抛出，不是 false。
      */
     suspend fun update(transform: (List<CardRecord>) -> List<CardRecord>): Boolean = lock.withLock {
-        if (!readable || state.value.loading) {
+        if (!state.value.readable || state.value.loading) {
             notify("本地数据尚不可写，请先完成加载或重置演示。")
             return@withLock false
         }
@@ -86,9 +85,7 @@ internal class CardCollection(
 
     /** 整表替换。成功时恢复为可写；读失败后只有这条路径能重新允许 update。 */
     suspend fun replace(cards: List<CardRecord>): Boolean = lock.withLock {
-        val saved = persist(cards)
-        if (saved) readable = true
-        saved
+        persist(cards)
     }
 
     private suspend fun persist(cards: List<CardRecord>): Boolean {
@@ -118,7 +115,7 @@ internal class CardCollection(
             // 取消不是读失败，不能在这里当成未提交。外层会在不可取消的协调之后再传播取消。
             throw cancelled
         } catch (_: Exception) {
-            readable = false
+            mutableState.value = state.value.copy(readable = false)
             notify("保存结果无法确认，已暂停写入，避免覆盖磁盘上的卡片。")
             return false
         }
@@ -137,8 +134,8 @@ internal class CardCollection(
 
     /**
      * 从磁盘装回的忙碌卡，没有活协程时收成已中断。
-     * 启动时任务表是空的，上次进程留下的 QUEUED/RUNNING/NEEDS_USER 会全部收掉。
-     * 无活协程不等于崩溃残留：本进程里正常结束设备协程的 NEEDS_USER 也会被收掉，这是当前策略。
+     * 启动时任务表是空的，上次进程留下的进行中任务和没有恢复入口的接管会收成中断。
+     * 无活协程不等于崩溃残留：已有明确手机设置入口的接管已持久化，可以在重开后继续。
      * 协程还在的任务留在内存里的阶段。
      */
     private fun settleBusyLoadedFromDisk(cards: List<CardRecord>): List<CardRecord> {
@@ -150,6 +147,7 @@ internal class CardCollection(
 
     private fun interruptStaleBusy(card: CardRecord): CardRecord {
         val run = card.run ?: return card
+        if (run.phase == RunPhase.NEEDS_USER && run.missingCapability != null) return card
         if (run.phase !in setOf(RunPhase.QUEUED, RunPhase.RUNNING, RunPhase.NEEDS_USER)) return card
         return card.copy(run = run.copy(
             phase = RunPhase.INTERRUPTED,

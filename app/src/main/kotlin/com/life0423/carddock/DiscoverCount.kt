@@ -20,7 +20,7 @@ private val countRequest = Regex("""(?:的|里|中)?(?:[「“]?([^「」“”]
 internal suspend fun discoverCount(context: Context, settings: ModelSettings, device: MikaBackgroundQuery,
     demand: String): DiscoveryResult? = withContext(Dispatchers.IO) {
     val text = demand.trim().replaceFirst(Regex("^(?:请)?(?:帮我)?(?:查看|查询|显示|看看)"), "")
-    if (!text.trimEnd('。','？','！','!','?').endsWith("数") && !text.trimEnd('。','？','！','!','?').endsWith("数量")) return@withContext null
+    if (!countRequest.matches(text)) return@withContext null
     val pm = context.packageManager
     val matches = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
         .map { it.loadLabel(pm).toString() to it.activityInfo.packageName }
@@ -51,7 +51,7 @@ internal suspend fun discoverCount(context: Context, settings: ModelSettings, de
     }
     when (result) {
         is DeviceResponse.Ready -> DiscoveryResult.Found(candidate(checkNotNull(picked)))
-        is DeviceResponse.NeedsUser -> if (demonstration.isEmpty()) DiscoveryResult.Incomplete(result.message)
+        is DeviceResponse.NeedsUser -> if (demonstration.isEmpty()) DiscoveryResult.Incomplete(result.message, result.missingCapability)
             else DiscoveryResult.Demonstrate(demonstration)
         is DeviceResponse.Failed -> DiscoveryResult.Incomplete(result.message)
     }

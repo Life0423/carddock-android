@@ -13,6 +13,7 @@ import com.life0423.carddock.core.rule.RuleStep
 import com.life0423.carddock.core.testing.FixedCompiler
 import com.life0423.carddock.core.testing.MemoryCardStore
 import com.life0423.carddock.core.testing.ObservedDevice
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -46,6 +47,14 @@ class PrototypeControllerTest {
             assertEquals(oldSnapshot, it.snapshot)
         }
         assertEquals(fixture.state.cards, fixture.store.disk)
+    }
+
+    @Test fun `reopening a card awaiting phone settings retains its action and snapshot`() = runTest {
+        val saved = savedCard().copy(run = RunInfo("paused", RunPhase.NEEDS_USER,
+            missingCapability = com.life0423.carddock.core.model.PhoneCapability.HELPER))
+        val fixture = fixture(listOf(saved))
+        fixture.initialize()
+        assertEquals(saved, fixture.state.cards.single())
     }
 
     @Test fun `refresh failure and takeover preserve last successful snapshot and timestamp`() = runTest {
@@ -198,6 +207,7 @@ class PrototypeControllerTest {
         val fixture = fixture()
         fixture.store.failRead = true
         fixture.initialize()
+        assertFalse(fixture.state.cardsReadable)
         assertTrue(fixture.state.cards.isEmpty())
         assertNull(fixture.store.disk)
         fixture.actions.openCreator(templates.first())
@@ -210,6 +220,23 @@ class PrototypeControllerTest {
         runCurrent()
         assertEquals(2, fixture.state.cards.size)
         assertNotNull(fixture.store.disk)
+    }
+
+    /** 系统停止任务时只取消自己的设备读取；已有的人工刷新仍可成功。 */
+    @Test fun scheduledStopCancelsItsOwnRead() = runTest {
+        val fixture = fixture()
+        fixture.initialize()
+        val id = fixture.state.cards.first().id
+        val scheduled = launch { fixture.controller.refreshStoredCard(id) }
+        runCurrent()
+        scheduled.cancel()
+        finishOperations()
+        assertEquals(RunPhase.CANCELLED, fixture.state.cards.first().run?.phase)
+        fixture.actions.refreshCard(id)
+        runCurrent()
+        assertFalse(fixture.controller.refreshStoredCard(id))
+        finishOperations()
+        assertEquals(RunPhase.SUCCEEDED, fixture.state.cards.first().run?.phase)
     }
 
     @Test fun `deleting a running card cannot resurrect it when the read completes`() = runTest {

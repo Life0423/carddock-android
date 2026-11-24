@@ -16,6 +16,9 @@ internal const val MONTHLY_ORDERS = "monthly-original-paid"
 internal val nextOrderWindow = DeviceResponse.NeedsUser("继续逐单核对。")
 private val navigation = setOf("我的","个人中心","订单","全部订单","我的订单","订单中心","订单列表","历史订单","交易记录","全部交易")
 private val orderId = Regex("""(?:订单号(?:码)?|订单编号)[：:]?\s*([A-Za-z0-9-]{6,64})""")
+// 仅接受当前列表内、整段写明订单总量的文字；分页笔数和金额不能作覆盖凭证。
+private val countedOrders = Regex("""(?:共|全部订单[：:])\s*(\d{1,6})\s*[笔条]订单""")
+private val statedOrderTotal = Regex("""(?:订单总数|全部订单)\s*[：:]\s*(\d{1,6})\s*(?:笔|条)""")
 private val placed = Regex("""下单时间[：:]?\s*(\d{4}-\d{2}-\d{2})(?:\s+(\d{2}:\d{2})(:\d{2})?)?""")
 private val money = Regex("""(?:退款前原实付|原实付(?:金额)?|订单实付(?:金额)?|实付(?:金额|款)?)[：:]?\s*(?:[￥¥]\s*(\d{1,9}(?:\.\d{1,2})?)|(\d{1,9}(?:\.\d{1,2})?)\s*元)""")
 private val complete = setOf("已完成","订单已完成","交易完成")
@@ -26,8 +29,8 @@ private val endLabels = setOf("没有更多订单","没有更多订单了","已�
 private val formatter = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss").withResolverStyle(java.time.format.ResolverStyle.STRICT)
 
 /** 在可见详情中绑定独占同一行的标签和值。 */
-internal fun DetailWindow.orderSemantics(): List<String> {
-    val live = nodes.filter { it.visible && it.bounds?.isEmpty == false && it.label.isNotBlank() }
+internal fun DetailWindow.orderSemantics(scope: List<DetailNode> = nodes): List<String> {
+    val live = scope.filter { it.visible && it.bounds?.isEmpty == false && it.label.isNotBlank() }
     val keys = setOf("下单时间","订单号码","订单编号","订单号","原实付金额","退款前原实付","订单实付","实付金额","实付",
         "订单类型","业务类型","订单状态","合计")
     val pairs = live.filter { it.label.trimEnd('：',':') in keys }.mapNotNull { label ->
@@ -55,6 +58,17 @@ internal fun DetailWindow.orderSemantics(): List<String> {
         values.singleOrNull()?.let { label.label.trimEnd('：',':') + "：" + it }
     }
     return live.map { it.label } + pairs
+}
+
+/** 国内外卖详情的「合计」行必须明确带人民币符号；金额与账本共用整数分的表示。 */
+internal fun Collection<String>.orderTotalCents(): Long? {
+    val pattern = Regex("""[¥￥]\s*(\d{1,9}(?:\.\d{1,2})?)""")
+    val amounts = filter { it.startsWith("合计：") || it.startsWith("合计:") }.map { row ->
+        // 另一条合计若无法解释币种或数值，不能用剩下的人民币候选替代它。
+        val amount = pattern.matchEntire(row.drop(3).trim())?.groupValues?.get(1) ?: return null
+        amount.toBigDecimal().movePointRight(2).longValueExact()
+    }
+    return amounts.distinct().singleOrNull()
 }
 
 /** 订单号只在一次本机核对期间使用。分组排版的数字订单号需要合并空格。 */
@@ -285,11 +299,7 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
                     }
                     if (idleReads++ < 3) continue
                     if (ids.size == 1 && at != null && hasState && status && isDelivery && hasType && amounts.isEmpty()) {
-                        val totals = detail.mapNotNull { field ->
-                            Regex("""合计：[¥￥](\d{1,9}(?:\.\d{1,2})?)""").matchEntire(field)?.groupValues?.get(1)
-                                ?.toBigDecimal()?.movePointRight(2)?.longValueExact()
-                        }.distinct()
-                        totals.singleOrNull()?.let { total ->
+                        detail.orderTotalCents()?.let { total ->
                             awaitingReceipt = OrderObservation(ids.single(), at, true, true, null) to total
                             return@withTimeoutOrNull nextOrderWindow
                         }
@@ -530,8 +540,22 @@ internal class OrderCollection(private val source: String, until: ZonedDateTime,
                 }
                 row
             }
+            // 条目及包含订单行的分组也可能显示自己的“订单总数”。只有独立于这些分支的汇总才算列表证据。
+            val rowBranches = mutableSetOf<Int>()
+            for (marker in markers) {
+                var ancestor = marker.parent
+                while (ancestor > index && rowBranches.add(ancestor)) ancestor = nodes[ancestor].parent
+            }
             val totals = contents.mapNotNull { n ->
-                Regex("""(?:共|全部订单[：:])\s*(\d{1,6})\s*[笔条]订单""").matchEntire(n.label)?.groupValues?.get(1)?.toInt()
+                val label = n.label.trim()
+                val match = countedOrders.matchEntire(label) ?: statedOrderTotal.matchEntire(label) ?: return@mapNotNull null
+                var ancestor = n.parent
+                if (n.rowIndex != null) return@mapNotNull null
+                while (ancestor > index) {
+                    if (ancestor in rowBranches || nodes[ancestor].rowIndex != null) return@mapNotNull null
+                    ancestor = nodes[ancestor].parent
+                }
+                match.groupValues[1].toInt()
             }.distinct()
             val empty = markers.isEmpty() && !node.canGoBack && !node.canGoForward &&
                 (node.collectionRows == 0 || totals == listOf(0)) && contents.any { it.label in setOf("暂无订单","暂无符合条件的订单","没有符合条件的订单") }

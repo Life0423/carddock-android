@@ -19,7 +19,15 @@ $adb = Join-Path $env:ANDROID_HOME 'platform-tools/adb.exe'
 & $adb -s <设备序列号> reverse tcp:8765 tcp:18765
 ```
 
-发布构建可通过工程属性 `carddockSquareEndpoint` 指定托管的 HTTPS 服务地址。此次验收使用本地服务，线上部署待安排。
+发布构建通过 `carddockSquareEndpoint` 指定 HTTPS 服务。beta.8 内测包接入 `https://8.140.236.38`；手机直连，无需电脑端口转发。
+
+## 内测服务与恢复
+
+阿里云上的 `carddock-square.service` 用独立系统用户运行 Python 3.11，监听 `127.0.0.1:19865`。独立的 `carddock-edge.service` 在 443 提供 HTTPS，由 Caddy 管理 Let's Encrypt 短期 IP 证书与续期。80 端口继续由原站点提供服务。源文件在 `/opt/carddock-square/server.py`，边缘服务配置在 `/etc/carddock-square/Caddyfile`。核验公网连接可使用 `GET /templates`，空广场返回 `[]`。
+
+`carddock-backup.timer` 每天把 SQLite 快照写入 `/var/lib/carddock-square/backups`。恢复演练用服务用户把选定备份复制到新的文件名，校验通过再安排切换。命令示例为 `python3.11 /opt/carddock-square/server.py --db 备份.db --backup-to 恢复演练.db`。已有目标文件会被拒绝覆盖。本机备份与数据库位于同一台服务器。
+
+「我的 → 账号管理 → 注销账号」需要当前密码。成功后撤销该账号所有会话，删除账号、发布和下载记录，并清理本机对应的广场收藏与下载。个人模板和空间卡片独立保存在手机。
 
 ## 账号存储与兼容
 

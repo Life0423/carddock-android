@@ -1,5 +1,7 @@
 package com.life0423.carddock.core.engine
 
+import com.life0423.carddock.core.model.PhoneCapability
+
 import com.life0423.carddock.core.model.CardSnapshot
 import com.life0423.carddock.core.model.AppPrice
 
@@ -25,5 +27,6 @@ sealed interface EngineResult {
      */
     data class Failure(val code: String, val message: String) : EngineResult
     /** 引擎到此返回，不再执行后续步骤。会话结束这次运行并放开通道；之后的取消要另写终态。 */
-    data class NeedsUser(val message: String) : EngineResult
+    data class NeedsUser(val message: String, val missingCapability: PhoneCapability? = null,
+        val mealMenu: com.life0423.carddock.core.rule.MealMenu? = null) : EngineResult
 }

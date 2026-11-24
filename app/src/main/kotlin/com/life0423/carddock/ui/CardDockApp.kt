@@ -38,6 +38,7 @@ internal fun CardDockApp(
     openAccessibilitySettings: () -> Unit = {},
     tools: PrototypeTools? = null,
     squareStore: SquareStore? = null,
+    marketHistory: Map<String, com.life0423.carddock.platform.PriceHistory> = emptyMap(),
     saveModel: (String, String, String) -> Unit = { _, _, _ -> },
     clearModel: () -> Unit = {},
     saveShopping: (String) -> Unit = {},
@@ -66,7 +67,8 @@ internal fun CardDockApp(
         }.singleOrNull()
         val detail = state.cards.firstOrNull { it.id == detailId }
         val pair = JdProduct.entries.mapNotNull { shoppingCard(state.cards, it)?.id }
-        val shoppingAvailable = tools != null && (tools.shopping != null || pair.size == 2)
+        var marketTab by rememberSaveable { mutableIntStateOf(0) }
+        val shoppingAvailable = tools != null
         val snackbarHost = remember { SnackbarHostState() }
         LaunchedEffect(state.notice) {
             state.notice?.let {
@@ -96,7 +98,7 @@ internal fun CardDockApp(
             containerColor = DockColors.Background,
             topBar = {
                 Row(
-                    Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 60.dp)
+                    Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 70.dp)
                         .padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -108,8 +110,8 @@ internal fun CardDockApp(
                     }
                     Text(
                         when (tab) {
-                            "templates" -> "模板"
-                            "square" -> "广场"
+                            "templates" -> "模板库"
+                            "square" -> "模板广场"
                             "profile" -> "我的"
                             else -> when {
                                 detail != null -> "卡片详情"
@@ -118,7 +120,8 @@ internal fun CardDockApp(
                             }
                         },
                         modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.headlineSmall, fontSize = 26.sp,
+                        style = MaterialTheme.typography.headlineSmall, fontSize = 30.sp,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -136,6 +139,7 @@ internal fun CardDockApp(
                         }
                         FilledIconButton(
                             onClick = { pickingTemplate = true },
+                            colors = IconButtonDefaults.filledIconButtonColors(containerColor = DockColors.Text, contentColor = DockColors.Surface),
                             enabled = !state.loading && state.sequence == null,
                             modifier = Modifier.testTag("open_creator"),
                         ) { Icon(Icons.Rounded.Add, "添加功能卡") }
@@ -148,14 +152,17 @@ internal fun CardDockApp(
                             Text("新建")
                         }
                     } else if (tab == "square" && square.available) {
-                        TextButton({ if (square.signedIn) publishPicker = true else requestAccount() },
+                        OutlinedButton({ publishPicker = true; if (!square.signedIn) requestAccount() },
                             enabled = !square.busy) { Text("发布") }
+                    } else if (tab == "profile") {
+                        androidx.compose.foundation.Image(painterResource(R.drawable.ticket_wallet), null, Modifier.size(38.dp))
                     }
                 }
             },
             bottomBar = {
-                DockNavigation(tab) {
+                if (tab != "space" || detail == null) DockNavigation(tab) {
                     if (it != "profile") accountReturn = null
+                    if (it != "square") publishPicker = false
                     tab = it
                     detailId = null
                     shopping = false
@@ -176,12 +183,23 @@ internal fun CardDockApp(
                     tab == "profile" -> ProfileScreen(
                         state.scenario, actions, openAccessibilitySettings, tools, saveModel, clearModel,
                         pageReaderConnected, mikaConnected, squareStore, square, accountReturn != null,
-                        onAccountClosed = { accountReturn?.let { tab = it }; accountReturn = null },
+                        onAccountClosed = { if (!square.signedIn) publishPicker = false; accountReturn?.let { tab = it }; accountReturn = null },
                     )
-                    detail != null -> CardDetail(detail, state.cards, actions, state.sequence == null, saveMeituanRoute, pickupTemplate)
+                    detail != null -> CardDetail(detail, state.cards, actions, state.sequence == null, saveMeituanRoute, pickupTemplate,
+                        marketHistory[detail.rule.targetKey].takeIf { detail.rule.sourceId == com.life0423.carddock.platform.APPLE_STORE })
                     shopping && tools != null -> shoppingState.SaveableStateProvider("shopping") {
-                        ShoppingScreen(state.cards, state.sequence, tools, actions, saveShopping,
-                            onOpenCard = { detailId = it })
+                        Column {
+                            TabRow(selectedTabIndex = marketTab) {
+                                listOf("官网价格榜", "京东 A/B").forEachIndexed { i, label ->
+                                    Tab(selected = marketTab == i, onClick = { marketTab = i }, text = { Text(label) })
+                                }
+                            }
+                            if (marketTab == 0) DisplayMarketScreen(state.cards, marketHistory,
+                                onTemplate = { actions.openTemplateEditor(null); actions.chooseDraftTemplate(it) },
+                                onWatch = actions.openCreator)
+                            else ShoppingScreen(state.cards, state.sequence, tools, actions, saveShopping,
+                                onOpenCard = { detailId = it })
+                        }
                     }
                     else -> SpaceScreen(
                         state.cards, actions, state.sequence, onOpenCard = { detailId = it },
@@ -190,8 +208,10 @@ internal fun CardDockApp(
                         shoppingFavorite = tools?.shoppingFavorite == true,
                         onToggleShoppingFavorite = toggleShoppingFavorite,
                         onAdd = { pickingTemplate = true },
+                        onOpenRank = { marketTab = 0; shopping = true },
                         onOpenShopping = if (shoppingAvailable) ({
                             shopping = true
+                            marketTab = if (pair.size == 2 || tools?.shopping != null) 1 else 0
                             if (pair.size == 2) actions.refreshSequence(pair)
                         }) else null,
                     )
@@ -202,8 +222,14 @@ internal fun CardDockApp(
         if (draft != null) {
             CreatorScreen(
                 draft = draft,
+                listCode = pickupTemplate?.pickupEntry,
                 templates = state.templates,
                 cards = state.cards,
+                chooseAnother = {
+                    returnToSpaceAfterSave = false
+                    pickingTemplate = true
+                    actions.closeCreator()
+                },
                 modelAvailable = tools?.model != null,
                 actions = actions.copy(
                     closeCreator = {
@@ -238,19 +264,20 @@ internal fun CardDockApp(
 private fun DockNavigation(selectedTab: String, onSelect: (String) -> Unit) {
     val labels = listOf("空间", "模板", "广场", "我的")
     val tags = listOf("space", "templates", "square", "profile")
-    val icons = listOf(R.drawable.nav_space, R.drawable.nav_templates, R.drawable.nav_square, R.drawable.nav_me)
+    val active = listOf(R.drawable.ticket_space_active, R.drawable.ticket_templates_active, R.drawable.ticket_square_active, R.drawable.ticket_me_active)
+    val idle = listOf(R.drawable.ticket_space_idle, R.drawable.ticket_templates_idle, R.drawable.ticket_square_idle, R.drawable.ticket_me_idle)
     Column {
         HorizontalDivider(color = DockColors.Outline)
-        NavigationBar(containerColor = DockColors.Background, tonalElevation = 0.dp) {
+        NavigationBar(containerColor = DockColors.Surface, tonalElevation = 0.dp) {
             labels.forEachIndexed { index, label ->
                 NavigationBarItem(
                     selected = selectedTab == tags[index],
                     onClick = { onSelect(tags[index]) },
-                    icon = { Icon(painterResource(icons[index]), contentDescription = null) },
+                    icon = { androidx.compose.foundation.Image(painterResource(if (selectedTab == tags[index]) active[index] else idle[index]), null, Modifier.size(24.dp)) },
                     label = { Text(label) },
                     modifier = Modifier.testTag("tab_${tags[index]}"),
                     colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = Color.Transparent,
+                        indicatorColor = MaterialTheme.colorScheme.primaryContainer,
                         selectedIconColor = DockColors.Mint,
                         selectedTextColor = DockColors.Mint,
                     ),

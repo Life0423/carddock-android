@@ -1,6 +1,10 @@
 package com.life0423.carddock.ui
 
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -41,7 +45,19 @@ import org.robolectric.annotation.LooperMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @LooperMode(LooperMode.Mode.PAUSED)
 class CardDockUiTest {
-    @get:Rule
+    // 非调试包不携带 Compose 测试清单，仅在 Robolectric 的包管理器中声明测试宿主。
+    @get:Rule(order = 0)
+    val host: org.junit.rules.ExternalResource = object : org.junit.rules.ExternalResource() {
+        override fun before() {
+            val app = org.robolectric.RuntimeEnvironment.getApplication()
+            org.robolectric.Shadows.shadowOf(app.packageManager).addOrUpdateActivity(android.content.pm.ActivityInfo().apply {
+                name = androidx.activity.ComponentActivity::class.java.name
+                packageName = app.packageName
+                applicationInfo = app.applicationInfo
+            })
+        }
+    }
+    @get:Rule(order = 1)
     val compose = createComposeRule()
 
     /** 账号从「我的」进入，验证注册表单和关闭后的返回位置。 */
@@ -129,7 +145,7 @@ class CardDockUiTest {
         compose.onNodeWithTag("open_creator").performClick()
         compose.onNodeWithTag("pick_template_created").assertDoesNotExist()
         compose.onNodeWithTag("picker_new_template").performClick()
-        compose.onNodeWithTag("creator_save").performScrollTo().performClick()
+        compose.onNodeWithTag("creator_save").performClick()
         compose.onNodeWithTag("pick_template_created").assertIsDisplayed()
     }
 
@@ -161,6 +177,21 @@ class CardDockUiTest {
         compose.onNodeWithTag("pick_template_personal-pickup").performClick()
         compose.onNodeWithText("配置卡片").assertIsDisplayed()
         assertEquals(listOf(ready.id, ready.id), events)
+    }
+
+    /** 仅重排商品字段仍保留独立核验的展示价；裁剪字段后按用户的可见范围展示。 */
+    @Test fun priceTicketSurvivesReorderingAllFields() {
+        val template = jdTemplates.first()
+        val fields = listOf(FieldValue("variant", "规格", "27 英寸"), FieldValue("title", "名称", "测试商品"))
+        val card = UiFixture.card.copy(rule = template.rule, kind = TemplateKind.SHOPPING,
+            snapshot = UiFixture.snapshot.copy(fields = fields),
+            display = fields.reversed().map { com.life0423.carddock.core.model.DisplayField(it.key, it.label) },
+            appPrice = com.life0423.carddock.core.model.AppPrice("21.50", "CNY", "27 英寸", "展示价", null, 1000))
+        val state = mutableStateOf(UiFixture.state(emptyList()).copy(cards = listOf(card)))
+        compose.setContent { CardDockApp(state.value, UiFixture.actions(mutableListOf())) }
+        compose.onNodeWithText("¥21.50").assertIsDisplayed()
+        compose.runOnIdle { state.value = state.value.copy(cards = listOf(card.copy(display = card.display.take(1)))) }
+        compose.onNodeWithText("¥21.50").assertDoesNotExist()
     }
 
     @Test
@@ -209,14 +240,14 @@ class CardDockUiTest {
         val state = mutableStateOf(UiFixture.state(TemplateCatalog.templates).copy(draft = draft))
         compose.setContent { CardDockApp(state.value, UiFixture.actions(events)) }
 
-        compose.onNodeWithTag("creator_save").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithText("完成操作后重新试运行").performScrollTo().performClick()
+        compose.onNodeWithTag("creator_save").assertDoesNotExist()
+        compose.onNodeWithText("完成操作后重新试运行").performClick()
         assertEquals(listOf("trial"), events)
 
         compose.runOnIdle { state.value = state.value.copy(draft = draft.copy(phase = RunPhase.RUNNING)) }
         compose.onNodeWithTag("creator_prompt").assertDoesNotExist()
         compose.onNodeWithTag("creator_trial").assertIsNotEnabled()
-        compose.onNodeWithTag("creator_save").assertIsNotEnabled()
+        compose.onNodeWithTag("creator_save").assertDoesNotExist()
 
         compose.runOnIdle {
             state.value = state.value.copy(
@@ -227,11 +258,67 @@ class CardDockUiTest {
                 ),
             )
         }
-        compose.onNodeWithTag("creator_save").performScrollTo().assertIsEnabled()
+        compose.onNodeWithTag("creator_save").assertIsEnabled()
         compose.onNodeWithText("确认后，刷新会直接运行已核验的规则。").performScrollTo()
         compose.captureScreen("03-create-preview")
         compose.onNodeWithTag("creator_save").performClick()
         assertEquals(listOf("trial", "save"), events)
+    }
+
+    /** 断连后打开详情只查看快照；来源时间和最后一次成功核验分别有自己的标签。 */
+    @Test
+    fun disconnectedAmountDetailKeepsBothTimesWithoutRefreshing() {
+        val events = mutableListOf<String>()
+        val snapshot = UiFixture.snapshot.copy(fields = listOf(
+            FieldValue("amount", "订单合计", "¥18.60"),
+            FieldValue("orderTime", "下单时间", "2026-10-12 11:10:14"),
+        ))
+        val card = UiFixture.card.copy(snapshot = snapshot,
+            run = RunInfo("lost-helper", RunPhase.NEEDS_USER, message = "助手未连接",
+                missingCapability = com.life0423.carddock.core.model.PhoneCapability.HELPER))
+        compose.setContent {
+            CardDockApp(UiFixture.state(TemplateCatalog.templates).copy(cards = listOf(card)), UiFixture.actions(events))
+        }
+        compose.onNodeWithText("连接后台助手").assertExists()
+        compose.onNodeWithTag("space_menu_express-card").performClick()
+        compose.onNodeWithText("查看详情").performClick()
+        for (text in listOf("¥18.60", "下单时间", "2026-10-12 11:10:14", "卡坞上次成功核验",
+            formatTimestamp(snapshot.fetchedAt, includeYear = true), "暂显示上次有效结果", "助手未连接", "连接后台助手")) {
+            compose.onNodeWithText(text).performScrollTo().assertIsDisplayed()
+        }
+        assertTrue(events.isEmpty())
+    }
+
+    /** 自定义卡面若隐藏了价格口径字段，详情仍应保留一次来源。 */
+    @Test fun priceSourceAppearsOnceWithOrWithoutSelectedBasis() {
+        val basis = com.life0423.carddock.platform.PRICE_BASIS
+        val fields = listOf(FieldValue("price", "官网标价", "¥11999"), FieldValue("basis", "价格来源", basis))
+        val card = mutableStateOf(UiFixture.card.copy(snapshot = UiFixture.snapshot.copy(fields = fields, sourceLabel = basis)))
+        compose.setContent { FunctionCard(card.value, {}) }
+        compose.onNodeWithText(basis).assertExists()
+        compose.runOnIdle {
+            card.value = card.value.copy(display = listOf(com.life0423.carddock.core.model.DisplayField("price", "官网标价")))
+        }
+        compose.onNodeWithText("价格来源").assertDoesNotExist()
+        compose.onNodeWithText(basis).assertExists()
+    }
+
+    /** 列表动作在票面和详情使用同一名称，点击票面仍走刷新。 */
+    @Test fun pickupListCardKeepsRefreshAndDestination() {
+        val events = mutableListOf<String>()
+        val card = UiFixture.card.copy(opensPickupList = true)
+        val code = com.life0423.carddock.cainiaoEmptyTemplate.copy(pickupEntry = com.life0423.carddock.core.model.PickupEntry.IDENTITY)
+        compose.setContent {
+            CardDockApp(UiFixture.state(TemplateCatalog.templates).copy(cards = listOf(card),
+                personalTemplates = listOf(PersonalTemplate(code.id, published = code))), UiFixture.actions(events))
+        }
+        compose.onNodeWithText("出示取件码").assertExists()
+        compose.onNodeWithText("打开菜鸟待取列表").assertExists()
+        compose.onNodeWithTag("refresh_express-card").performClick()
+        compose.onNodeWithTag("space_menu_express-card").performClick()
+        compose.onNodeWithText("查看详情").performClick()
+        compose.onNodeWithText("打开菜鸟待取列表").performScrollTo().assertIsDisplayed()
+        assertEquals(listOf("refresh:express-card"), events)
     }
 
     @Test
@@ -266,5 +353,56 @@ class CardDockUiTest {
             listOf("refresh:express-card", "cancel:express-card", "resume:express-card", "delete:express-card"),
             events,
         )
+    }
+
+    /** 放大字号后，长内容滚动时，底栏操作仍可直接点击。 */
+    @Test fun largeFontBookCardKeepsRefreshVisibleAndLinkPaired() {
+        val events = mutableListOf<String>()
+        val search = com.life0423.carddock.BookSearch("悬疑小说", 5)
+        val snapshot = UiFixture.snapshot.copy(fields = buildList {
+            add(FieldValue("summary", "我的查书进展", "已核对 5/5 本"))
+            for (i in 1..5) {
+                add(FieldValue("book$i", "图书 $i", "书目 $i\n商品标题 $i\n推荐依据 · 精装版"))
+                add(FieldValue("url$i", "商品链接 $i", "https://item.taobao.com/item.htm?id=12345678$i"))
+            }
+        })
+        val card = UiFixture.card.copy(title = "淘宝找书", rule = search.template("").rule, snapshot = snapshot)
+        val enlarged = mutableStateOf(false)
+        val sample = card.copy(title = "淘宝找书 · 悬疑小说", snapshot = snapshot.copy(fields = listOf(
+            FieldValue("summary", "核对进度", "已核对 2/2 本"),
+            FieldValue("book1", "图书 1", "夏天烟火和我的尸体\n精装收藏版\n推荐依据 · 商品详情标注「精装收藏」、「日式恐怖」"),
+            snapshot.fields[2],
+            FieldValue("book2", "图书 2", "福尔摩斯探案全集\n精装硬壳版\n推荐依据 · 商品详情标注「无删减」、「精装硬壳」"),
+            snapshot.fields[4],
+        ), sourceLabel = "淘宝官方 App · 独立查询屏"))
+        compose.setContent {
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides
+                androidx.compose.ui.unit.Density(density.density, if (enlarged.value) 1.5f else 1f)) {
+                val selected = if (enlarged.value) card else sample
+                CardDockApp(UiFixture.state(TemplateCatalog.templates).copy(cards = listOf(selected)), UiFixture.actions(events))
+            }
+        }
+        compose.onNodeWithTag("space_menu_${card.id}").performClick()
+        compose.onNodeWithTag("open_card_${card.id}").performClick()
+        compose.onNodeWithTag("refresh_${card.id}").assertIsDisplayed()
+        for (label in listOf("刷新卡片", "打开淘宝商品")) {
+            val text = compose.onAllNodes(androidx.compose.ui.test.hasText(label), useUnmergedTree = true)[0]
+            val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            text.performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            assertEquals(16.sp, layouts.single().layoutInput.style.fontSize)
+            assertEquals(androidx.compose.ui.text.font.FontWeight.Medium, layouts.single().layoutInput.style.fontWeight)
+        }
+        compose.onNodeWithTag("refresh_${card.id}").assertHeightIsAtLeast(48.dp)
+        compose.captureScreen("21-book-detail")
+        compose.runOnIdle { enlarged.value = true }
+        compose.onNodeWithText("我的查书进展").assertIsDisplayed()
+        val refresh = compose.onNodeWithTag("refresh_${card.id}")
+        refresh.assertIsDisplayed()
+        val before = refresh.fetchSemanticsNode().boundsInRoot
+        compose.onNodeWithContentDescription("打开淘宝商品，书目 5").performScrollTo().assertIsDisplayed()
+        assertEquals(before, refresh.fetchSemanticsNode().boundsInRoot)
+        refresh.performClick()
+        assertEquals(listOf("refresh:${card.id}"), events)
     }
 }

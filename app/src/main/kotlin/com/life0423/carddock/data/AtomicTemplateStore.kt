@@ -1,7 +1,6 @@
 package com.life0423.carddock.data
 
 import android.content.Context
-import android.util.AtomicFile
 import com.life0423.carddock.core.model.PersonalTemplate
 import com.life0423.carddock.core.port.TemplateStore
 import com.life0423.carddock.core.rule.RuleValidator
@@ -12,7 +11,7 @@ import kotlinx.serialization.json.Json
 
 /** 只持久化模板库结构。一次写入同时提交可用版本和编辑草稿。 */
 internal class AtomicTemplateStore(context: Context, private val json: Json) : TemplateStore {
-    private val file = AtomicFile(File(context.filesDir, "personal-templates-v1.json"))
+    private val file = CollectionFile(File(context.filesDir, "personal-templates-v1.json"))
 
     override suspend fun load(): List<PersonalTemplate> = withContext(Dispatchers.IO) {
         if (!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()) return@withContext emptyList()

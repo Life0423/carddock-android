@@ -96,6 +96,14 @@ private class DisplayService(private val shell: Context, private val uid: Int) :
         return open(surface, width, height, density, targetPackage, launcher)
     }
 
+    /** 仅在独立屏重新打开从官方商品分享面板读取的淘宝链接。 */
+    override fun openBookShare(surface: Surface, width: Int, height: Int, density: Int, url: String): Int {
+        if (!com.life0423.carddock.officialBookUrl(url)) return -1
+        val pkg = com.life0423.carddock.TAOBAO
+        return open(surface, width, height, density, pkg, Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            .setPackage(pkg).addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK))
+    }
+
     override fun openCainiao(surface: Surface, width: Int, height: Int, density: Int): Int =
         open(surface, width, height, density, CAINIAO_PACKAGE,
             // 使用独立任务，避免亮码后保留在主屏的菜鸟任务被普通刷新复用。
@@ -163,9 +171,54 @@ private class DisplayService(private val shell: Context, private val uid: Int) :
         }
     }
 
+    private val shownLists = mutableMapOf<Int, Int>()
+
+    /** 只搬移实测取件页所在的同一任务。试运行仅允许收回该查询屏刚交出的任务。 */
+    override fun movePickupList(displayId: Int, returnToQuery: Boolean) = moveVerifiedTask(displayId, returnToQuery,
+        ComponentName(CAINIAO_PACKAGE, "$CAINIAO_PACKAGE.pickup.view.activity.PickUpActivity"))
+
+    override fun showMealDetail(displayId: Int) = moveVerifiedTask(displayId, false,
+        ComponentName(com.life0423.carddock.ai.MCD_PACKAGE, "com.mcd.product.activity.detail.ProductGroupDetailActivity"))
+
+    /** 只移动指定来源、当前用户及详情 Activity 全部匹配的查询任务。 */
     @Synchronized
+    private fun moveVerifiedTask(displayId: Int, returnToQuery: Boolean, expected: ComponentName): Boolean {
+        check(Binder.getCallingUid() == uid)
+        if (displayId !in displays) return false
+        val identity = Binder.clearCallingIdentity()
+        try {
+            val from = if (returnToQuery) 0 else displayId
+            val to = if (returnToQuery) displayId else 0
+            val roots = tasks.javaClass.getMethod("getAllRootTaskInfosOnDisplay", Int::class.javaPrimitiveType)
+                .invoke(tasks, from) as List<*>
+            val root = roots.filterNotNull().singleOrNull {
+                taskInfo.getField("isVisible").getBoolean(it) &&
+                    taskInfo.getField("topActivity").get(it) == expected &&
+                    taskInfo.getField("userId").getInt(it) == uid / 100_000
+            } ?: return false
+            val task = taskInfo.getField("taskId").getInt(root)
+            if (returnToQuery && shownLists[displayId] != task) return false
+            tasks.javaClass.getMethod("moveRootTaskToDisplay", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+                .invoke(tasks, task, to)
+            if (!returnToQuery && expected.packageName == CAINIAO_PACKAGE) shownLists[displayId] = task
+            return true
+        } catch (_: ReflectiveOperationException) {
+            return false
+        } finally {
+            Binder.restoreCallingIdentity(identity)
+        }
+    }
+
+    @Synchronized
+    /** 仅所属卡坞可停止本次助手；退出后系统回收进程绑定的显示资源。 */
+    override fun stopHelper() {
+        check(Binder.getCallingUid() == uid)
+        exitProcess(0)
+    }
+
     override fun closeDisplay(displayId: Int) {
         check(Binder.getCallingUid() == uid)
+        shownLists.remove(displayId)
         displays.remove(displayId)?.release()
     }
 

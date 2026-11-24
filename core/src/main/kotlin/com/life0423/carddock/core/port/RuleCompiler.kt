@@ -1,5 +1,7 @@
 package com.life0423.carddock.core.port
 
+import com.life0423.carddock.core.model.PhoneCapability
+
 import com.life0423.carddock.core.model.TemplateDefinition
 
 /** Success 只是候选模板，控制器在引擎试运行通过之前不会把它存成卡片。 */
@@ -24,5 +26,7 @@ data class DiscoveredTemplate(val template: TemplateDefinition, val observed: Ma
 sealed interface DiscoveryResult {
     data class Found(val candidate: DiscoveredTemplate) : DiscoveryResult
     data class Demonstrate(val choices: List<DiscoveredTemplate>) : DiscoveryResult
-    data class Incomplete(val reason: String) : DiscoveryResult
+    /** 用户确认需求理解后才进入独立试查，方案本身没有已核验数据。 */
+    data class Plans(val choices: List<TemplateDefinition>, val question: String) : DiscoveryResult
+    data class Incomplete(val reason: String, val missingCapability: PhoneCapability? = null) : DiscoveryResult
 }

@@ -5,7 +5,6 @@ import com.life0423.carddock.core.port.CompileResult
 import com.life0423.carddock.core.port.RuleCompiler
 import com.life0423.carddock.core.rule.RuleSpec
 import com.life0423.carddock.platform.readBounded
-import com.life0423.carddock.core.rule.RuleValidator
 import java.net.HttpURLConnection
 import java.net.URI
 import java.io.IOException
@@ -60,15 +59,19 @@ internal fun compileCainiaoCandidate(content: String): CompileResult {
         return CompileResult.Unsupported("模型候选格式无效，未执行。")
     }
     val baseline = cainiaoEmptyTemplate.rule
-    if (RuleValidator.validate(rule) != null || rule.sourceId != baseline.sourceId ||
-        rule.targetKey != baseline.targetKey || !rule.id.matches(Regex("[A-Za-z0-9_-]{1,64}")) ||
-        rule.steps != baseline.steps
+    if (!rule.id.matches(Regex("[A-Za-z0-9_-]{1,64}")) || rule.copy(id = baseline.id) != baseline
     ) return CompileResult.Unsupported("模型候选超出菜鸟只读范围，未执行。")
     return CompileResult.Success(cainiaoEmptyTemplate.copy(rule = rule))
 }
 
 /** 共用已配置的模型连接；调用方负责构造脱敏输入及校验返回值。 */
-internal fun requestModel(config: ModelConfig, instruction: String): String {
+internal fun requestModel(config: ModelConfig, instruction: String, input: String? = null): String {
+    val message = modelMessage(config, instruction, input)
+    return (message?.get("content") as? JsonPrimitive)?.takeIf { it.isString }?.content.orEmpty()
+}
+
+/** 普通文本与工具调用共用 HTTPS、认证和响应大小限制，工具回复单独解码。 */
+internal fun modelMessage(config: ModelConfig, instruction: String, input: String?, tools: JsonArray? = null): JsonObject? {
     val connection = URI(config.endpoint + "/chat/completions").toURL().openConnection() as HttpURLConnection
     connection.instanceFollowRedirects = false
     connection.connectTimeout = 10_000
@@ -80,11 +83,13 @@ internal fun requestModel(config: ModelConfig, instruction: String): String {
     val body = buildJsonObject {
         put("model", config.model)
         put("stream", false)
+        if (tools != null) put("tools", tools)
         putJsonArray("messages") {
             addJsonObject {
-                put("role", "user")
+                put("role", if (input == null) "user" else "system")
                 put("content", instruction)
             }
+            if (input != null) addJsonObject { put("role", "user"); put("content", input) }
         }
     }
     try {
@@ -96,8 +101,6 @@ internal fun requestModel(config: ModelConfig, instruction: String): String {
         val response = connection.inputStream.bufferedReader().use { it.readBounded(32 * 1024) }
         val root = Json.parseToJsonElement(response) as? JsonObject
         val choice = (root?.get("choices") as? JsonArray)?.firstOrNull() as? JsonObject
-        val message = choice?.get("message") as? JsonObject
-        val content = (message?.get("content") as? JsonPrimitive)?.takeIf { it.isString }?.content.orEmpty()
-        return content
+        return choice?.get("message") as? JsonObject
     } finally { connection.disconnect() }
 }

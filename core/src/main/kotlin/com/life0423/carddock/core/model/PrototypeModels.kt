@@ -56,6 +56,10 @@ enum class RunPhase {
     INTERRUPTED,
 }
 
+/** 仅记录此轮实际缺少的本机能力，旧记录默认没有恢复动作。 */
+@Serializable
+enum class PhoneCapability { PAGE_READER, HELPER }
+
 /**
  * 最近一次运行。协调器新建排队记录时 endedAt 为空，推进到运行中时也不填。
  * 成功、接管、取消由协调器写 endedAt。创建保存把试运行收成卡片时也会写。
@@ -71,6 +75,7 @@ data class RunInfo(
     val startedAt: Long = 0,
     val endedAt: Long? = null,
     val appPrice: Boolean = false,
+    val missingCapability: PhoneCapability? = null,
 )
 
 /** 授权订单号仅用于本机核对，不进入规则和卡片展示字段。 */
@@ -114,6 +119,8 @@ data class CardRecord(
     val sourceTemplateRevision: Int? = null,
     val display: List<DisplayField> = emptyList(),
     val pickupEntry: PickupEntry? = null,
+    val opensPickupList: Boolean = false,
+    val theme: CardTheme? = null,
 )
 
 /** 一条可试运行的演示模板。examplePrompt 只负责预填，编译器仍按用户最终输入分流，不按模板 id。 */
@@ -129,4 +136,13 @@ data class TemplateDefinition(
     val revision: Int = 1,
     val display: List<DisplayField> = emptyList(),
     val pickupEntry: PickupEntry? = null,
+    val opensPickupList: Boolean = false,
+    val theme: CardTheme? = null,
 )
+
+/** 主题只影响外观，可独立于能力覆盖；缺省时按规则推断，兼容旧卡。 */
+@Serializable
+enum class CardTheme(val label: String) {
+    FOOD("美食"), PARCEL("包裹"), ORDER("订单"), SHOPPING("购物"), DIGITAL("数码"), PRICE("价格"), BILL("账单"), FILE("文件"),
+    CALENDAR("日程"), REMINDER("提醒"), TRAVEL("出行"), TICKET("票券"), STUDY("学习"), WORK("工作"), SPORT("运动"), OTHER("通用")
+}
