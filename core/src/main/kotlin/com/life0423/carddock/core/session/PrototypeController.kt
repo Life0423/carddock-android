@@ -3,6 +3,7 @@ package com.life0423.carddock.core.session
 import com.life0423.carddock.core.engine.RuleEngine
 import com.life0423.carddock.core.model.CardRecord
 import com.life0423.carddock.core.model.CompareGroup
+import com.life0423.carddock.core.model.PageTarget
 import com.life0423.carddock.core.model.RunPhase
 import com.life0423.carddock.core.model.TemplateDefinition
 import com.life0423.carddock.core.port.CardStore
@@ -34,12 +35,13 @@ class PrototypeController(
     private val setDeviceScenario: (DemoScenario) -> Unit = {},
     now: () -> Long = System::currentTimeMillis,
     private val newId: () -> String = { UUID.randomUUID().toString() },
+    releaseCover: suspend (String) -> Unit = {},
 ) {
     private val notice = MutableStateFlow<String?>(null)
     private val scenario = MutableStateFlow(DemoScenario.NORMAL)
     // 构造属性按顺序初始化，runs 这时还不存在。查找放到 init，initialize 只会在构造完成之后调用。
     private var liveJob: (String) -> Boolean = { false }
-    private val cards = CardCollection(store, ::notify, now) { liveJob(it) }
+    private val cards = CardCollection(store, ::notify, now, releaseCover) { liveJob(it) }
     // 试运行和卡片刷新共用这一把锁，同一时刻只有一次设备读取。
     private val lane = Mutex()
     private val runs = RunCoordinator(cards, engine, lane, scope, now, newId)
@@ -94,8 +96,26 @@ class PrototypeController(
         renameGroup = ::renameGroup,
         removeGroupMember = ::removeGroupMember,
         dissolveGroup = ::dissolveGroup,
+        togglePin = { id -> scope.launch {
+            cards.update { current ->
+                val nextPin = (current.mapNotNull { it.pinOrder }.maxOrNull() ?: 0) + 1
+                current.map { card ->
+                    if (card.id == id) card.copy(pinOrder = if (card.pinOrder == null) nextPin else null) else card
+                }
+            }
+        } },
+        setCover = { id, uri -> scope.launch {
+            cards.update { current -> current.map { if (it.id == id) it.copy(coverUri = uri) else it } }
+        } },
+        savePage = ::savePage,
         trialPreparedTemplate = { creator.trial(it) },
     )
+
+    /** 页面卡与任务卡共享空间提交；页面打开不经过任务引擎。 */
+    private suspend fun savePage(title: String, target: PageTarget): Boolean {
+        if (resetting || title.isBlank()) return false
+        return cards.update { it + CardRecord(id = newId(), title = title.trim().take(40), page = target) }
+    }
 
     /** 建组只收纳独立卡片，在最早被选卡位置插入有序成员，未选卡相对顺序不变。 */
     private fun createGroup(name: String, memberIds: List<String>) {

@@ -3,6 +3,7 @@ package com.life0423.carddock.core.session
 import com.life0423.carddock.core.model.CardRecord
 import com.life0423.carddock.core.model.CompareGroup
 import com.life0423.carddock.core.model.CardSnapshot
+import com.life0423.carddock.core.model.PageTarget
 import com.life0423.carddock.core.model.RunPhase
 import com.life0423.carddock.core.model.TemplateDefinition
 
@@ -60,5 +61,8 @@ data class PrototypeActions(
     val renameGroup: (String, String) -> Unit = { _, _ -> },
     val removeGroupMember: (String, String) -> Unit = { _, _ -> },
     val dissolveGroup: (String) -> Unit = {},
+    val togglePin: (String) -> Unit = {},
+    val setCover: (String, String?) -> Unit = { _, _ -> },
+    val savePage: suspend (String, PageTarget) -> Boolean = { _, _ -> false },
     val trialPreparedTemplate: (TemplateDefinition) -> Unit = {},
 )

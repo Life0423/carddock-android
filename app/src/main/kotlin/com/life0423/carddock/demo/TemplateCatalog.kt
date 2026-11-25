@@ -23,7 +23,7 @@ object TemplateCatalog {
             title = "待取快递",
             description = "把取件码、取件位置和包裹状态放到一张卡片里。",
             kind = TemplateKind.EXPRESS,
-            examplePrompt = "查看我的快递取件码和取件位置",
+            examplePrompt = "演示：查看快递取件码和取件位置",
             rule = rule(
                 id = "express-pickup",
                 sourceId = EXPRESS_SOURCE,
@@ -36,7 +36,7 @@ object TemplateCatalog {
             title = "外卖进度",
             description = "汇总配送状态、预计送达时间和餐品信息。",
             kind = TemplateKind.DELIVERY,
-            examplePrompt = "查看我的外卖配送状态和预计送达时间",
+            examplePrompt = "演示：查看外卖配送状态和预计送达时间",
             rule = rule(
                 id = "delivery-status",
                 sourceId = DELIVERY_SOURCE,
@@ -49,7 +49,7 @@ object TemplateCatalog {
             title = "出行安排",
             description = "随时查看这一程的路线、出发时间和检票位置。",
             kind = TemplateKind.TRAVEL,
-            examplePrompt = "查看我的出行路线、出发时间和检票口",
+            examplePrompt = "演示：查看出行路线、出发时间和检票口",
             rule = rule(
                 id = "travel-overview",
                 sourceId = TRAVEL_SOURCE,

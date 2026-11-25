@@ -88,13 +88,13 @@ internal class RunCoordinator(
         val job = currentCoroutineContext()[Job]
         val runId = newId()
         try {
-            val card = cards.find(cardId) ?: return
+            val rule = cards.find(cardId)?.rule ?: return
             val queued = cards.update { current -> current.map {
                 if (it.id == cardId) it.copy(run = RunInfo(
                     id = runId,
                     phase = RunPhase.QUEUED,
                     message = "等待设备操作通道",
-                    totalSteps = card.rule.steps.size,
+                    totalSteps = rule.steps.size,
                     startedAt = now(),
                 )) else it
             } }
@@ -114,7 +114,7 @@ internal class RunCoordinator(
                     phase = RunPhase.RUNNING,
                     message = "正在读取数据来源",
                 )) }
-                val result = engine.execute(card.rule) { progress ->
+                val result = engine.execute(rule) { progress ->
                     update(cardId, runId) { it.copy(run = it.run!!.copy(
                         currentStep = progress.currentStep,
                         totalSteps = progress.totalSteps,

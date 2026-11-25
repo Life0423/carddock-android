@@ -11,22 +11,22 @@ import androidx.compose.ui.graphics.Color
  * 业务层不要直接写色值。界面只引用这里的命名颜色。
  */
 object DockColors {
-    val Background = Color(0xFFFFFFFF)
-    val Surface = Color(0xFFF5F5F8)
-    val Raised = Color(0xFFF0EFFF)
-    val Outline = Color(0xFFE8E9EE)
-    val Mint = Color(0xFF5754D6)
+    val Background = Color(0xFFF8F7F4)
+    val Surface = Color.White
+    val Raised = Color(0xFFECEAF8)
+    val Outline = Color(0xFFE1DFDA)
+    val Mint = Color(0xFF5148BD)
     val Amber = Color(0xFF8A5B16)
-    val Blue = Color(0xFF5754D6)
-    val Text = Color(0xFF202124)
-    val Muted = Color(0xFF737780)
+    val Blue = Color(0xFF345788)
+    val Text = Color(0xFF242330)
+    val Muted = Color(0xFF64636D)
     val Error = Color(0xFFB3333F)
 }
 
 private val CardDockColorScheme = lightColorScheme(
     primary = DockColors.Mint,
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFF0EFFF),
+    primaryContainer = Color(0xFFECEAF8),
     onPrimaryContainer = Color(0xFF343185),
     secondary = DockColors.Blue,
     onSecondary = Color(0xFFFFFFFF),
@@ -44,8 +44,7 @@ private val CardDockColorScheme = lightColorScheme(
 )
 
 /**
- * 已选浅色主题；保留固定品牌色，不跟随壁纸动态取色。
- * 不跟系统动态取色，演示配色不会被壁纸色替换。
+ * 采用固定浅色品牌配色。
  */
 @Composable
 fun CardDockTheme(content: @Composable () -> Unit) {

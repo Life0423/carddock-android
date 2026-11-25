@@ -1,8 +1,7 @@
 package com.life0423.carddock
 
-import com.life0423.carddock.ai.MockRuleCompiler
+import com.life0423.carddock.ai.TemplateRuleCompiler
 import com.life0423.carddock.core.engine.RuleEngine
-import com.life0423.carddock.core.port.CompileResult
 import com.life0423.carddock.core.session.PrototypeController
 import com.life0423.carddock.core.model.RunPhase
 import com.life0423.carddock.core.testing.MemoryCardStore
@@ -24,7 +23,7 @@ class NativeFlowTest {
         })
         val templates = TemplateCatalog.templates + cainiaoEmptyTemplate
         val store = MemoryCardStore(emptyList())
-        val controller = PrototypeController(store, MockRuleCompiler(templates), RuleEngine(gateway, now = { 123L }), templates, backgroundScope)
+        val controller = PrototypeController(store, TemplateRuleCompiler(templates) { _, _ -> error("内置模板不需要模型") }, RuleEngine(gateway, now = { 123L }), templates, backgroundScope)
         controller.initialize()
         controller.actions.openCreator(cainiaoEmptyTemplate)
         controller.actions.trialDraft()
@@ -41,17 +40,10 @@ class NativeFlowTest {
         val after = store.disk!!.single()
         assertEquals(RunPhase.NEEDS_USER, after.run?.phase)
         assertEquals(saved.snapshot, after.snapshot)
-        val restored = PrototypeController(store, MockRuleCompiler(templates), RuleEngine(gateway), templates, backgroundScope)
+        val restored = PrototypeController(store, TemplateRuleCompiler(templates) { _, _ -> error("内置模板不需要模型") }, RuleEngine(gateway), templates, backgroundScope)
         restored.initialize()
         testScheduler.runCurrent()
         assertEquals(saved.snapshot, restored.state.value.cards.single().snapshot)
     }
 
-    @Test fun nativeRequestsNeverBecomeDemoPickupCodes() = runTest {
-        val compiler = MockRuleCompiler(TemplateCatalog.templates + cainiaoEmptyTemplate)
-        assertEquals(CompileResult.Success(cainiaoEmptyTemplate), compiler.compile(cainiaoEmptyTemplate.examplePrompt))
-        assertTrue(compiler.compile("查看菜鸟取件码") is CompileResult.Unsupported)
-        assertTrue(compiler.compile("核验菜鸟暂无待取包裹并支付") is CompileResult.Unsupported)
-        assertEquals(CompileResult.Success(TemplateCatalog.templates.first()), compiler.compile(TemplateCatalog.templates.first().examplePrompt))
-    }
 }

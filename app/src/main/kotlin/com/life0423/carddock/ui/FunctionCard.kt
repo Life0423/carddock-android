@@ -1,5 +1,10 @@
 package com.life0423.carddock.ui
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,7 +18,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -30,12 +34,26 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.life0423.carddock.core.model.CardRecord
 import com.life0423.carddock.core.model.RunPhase
+import com.life0423.carddock.platform.CAINIAO_PACKAGE
+import com.life0423.carddock.platform.CardDockAccessibilityService
+import com.life0423.carddock.platform.MEITUAN_PACKAGE
 import com.life0423.carddock.ui.theme.DockColors
+
+internal fun CardRecord.resultSource(): String = snapshot?.sourceLabel ?: when (val source = rule?.sourceId) {
+    CAINIAO_PACKAGE -> "菜鸟"
+    MEITUAN_PACKAGE -> "美团"
+    null -> page?.let { Uri.parse(it.url).host }.orEmpty()
+    else -> if (source.startsWith("demo.")) "模拟设备 · 演示数据" else source
+}
+
+internal fun CardRecord.latestPhase(): RunPhase =
+    run?.phase ?: if (snapshot == null) RunPhase.IDLE else RunPhase.SUCCEEDED
 
 /**
  * The same card component renders fresh, stale, running and interrupted states.
@@ -51,7 +69,8 @@ internal fun FunctionCard(
     onResume: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val phase = card.run?.phase ?: if (card.snapshot == null) RunPhase.IDLE else RunPhase.SUCCEEDED
+    val phase = card.latestPhase()
+    val fields = card.snapshot?.fields.orEmpty()
     // 按卡片 id 记住。列表复用到另一张卡时丢掉上一张的删除确认。
     var menuOpen by remember(card.id) { mutableStateOf(false) }
     var confirmDelete by remember(card.id) { mutableStateOf(false) }
@@ -59,16 +78,15 @@ internal fun FunctionCard(
     Surface(
         modifier = Modifier.fillMaxWidth().testTag("card_${card.id}"),
         color = DockColors.Surface,
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, DockColors.Outline),
     ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                KindIcon(card.kind)
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text(card.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    StatusBadge(phase)
-                }
-                Column {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(card.kind.icon(), null, Modifier.size(20.dp), tint = card.kind.accent())
+                Text(card.resultSource(), Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, color = DockColors.Muted)
+                StatusBadge(phase)
+                Box {
                     IconButton(onClick = { menuOpen = true }, modifier = Modifier.testTag("menu_${card.id}")) {
                         Icon(DockIcons.MoreHoriz, contentDescription = "${card.title}的更多操作", tint = DockColors.Muted)
                     }
@@ -81,33 +99,39 @@ internal fun FunctionCard(
                     }
                 }
             }
-
-            card.snapshot?.let { snapshot ->
+            val primary = fields.firstOrNull()
+            if (primary != null) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(primary.label, style = MaterialTheme.typography.labelLarge, color = DockColors.Muted)
+                    Text(primary.value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                }
+            } else {
+                Text("尚无核验结果", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            }
+            card.snapshot?.let {
+                Text("上次成功 ${formatTimestamp(it.fetchedAt)}", style = MaterialTheme.typography.bodySmall, color = DockColors.Muted)
                 if (phase != RunPhase.SUCCEEDED && phase != RunPhase.IDLE) {
                     Text("暂显示上次有效结果", color = DockColors.Amber, style = MaterialTheme.typography.labelMedium)
                 }
-                SnapshotFields(snapshot.fields)
-            } ?: Text("还没有有效结果。点击刷新，执行并核验这张功能卡。", color = DockColors.Muted)
-
-            card.run?.message?.takeIf { it.isNotBlank() && phase != RunPhase.SUCCEEDED }?.let { message ->
-                Text(
-                    message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (phase == RunPhase.FAILED) DockColors.Error else DockColors.Amber,
-                )
+            }
+            card.run?.message?.takeIf { it.isNotBlank() && phase != RunPhase.SUCCEEDED }?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium,
+                    color = if (phase == RunPhase.FAILED) DockColors.Error else DockColors.Amber)
             }
             if (phase.isBusy()) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = DockColors.Mint, trackColor = DockColors.Raised)
-            }
-
-            HorizontalDivider(color = DockColors.Outline.copy(alpha = 0.5f))
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(card.snapshot?.sourceLabel ?: if (card.rule.sourceId.startsWith("demo.")) "模拟设备 · 演示数据" else "真机 · 待核验", style = MaterialTheme.typography.labelSmall, color = DockColors.Muted)
-                card.snapshot?.let {
-                    Text("上次成功 ${formatTimestamp(it.fetchedAt)}", style = MaterialTheme.typography.labelSmall, color = DockColors.Muted)
-                }
+                LinearProgressIndicator(Modifier.fillMaxWidth(), color = DockColors.Mint, trackColor = DockColors.Raised)
             }
             CardActions(card.id, phase, onRefresh, onCancel, onResume)
+            val sourceId = card.rule?.sourceId
+            if (phase == RunPhase.NEEDS_USER && (sourceId == CAINIAO_PACKAGE || sourceId == MEITUAN_PACKAGE) &&
+                CardDockAccessibilityService.instance == null) {
+                val context = LocalContext.current
+                TextButton({ context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }) { Text("打开无障碍设置") }
+            }
+            if (fields.size > 1) {
+                HorizontalDivider(color = DockColors.Outline)
+                SnapshotFields(fields.drop(1))
+            }
         }
     }
 
@@ -144,7 +168,7 @@ private fun CardActions(
             Button(onResume, Modifier.weight(1f).testTag("resume_$id")) { Text("重新核验") }
             TextButton(onCancel, Modifier.testTag("cancel_$id")) { Text("取消") }
         }
-        else -> FilledTonalButton(onRefresh, Modifier.fillMaxWidth().testTag("refresh_$id")) {
+        else -> Button(onRefresh, Modifier.fillMaxWidth().testTag("refresh_$id")) {
             Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp))
             Text(if (phase == RunPhase.FAILED || phase == RunPhase.INTERRUPTED) "重新运行" else "刷新卡片", Modifier.padding(start = 6.dp))
         }

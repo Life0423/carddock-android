@@ -30,6 +30,7 @@ internal class CardCollection(
     private val store: CardStore,
     private val notify: (String) -> Unit,
     private val now: () -> Long,
+    private val releaseCover: suspend (String) -> Unit = {},
     private val hasLiveJob: (cardId: String) -> Boolean = { false },
 ) {
     private val lock = Mutex()
@@ -107,12 +108,16 @@ internal class CardCollection(
     }
 
     private suspend fun persist(space: SpaceRecords): Boolean {
+        val retained = space.cards.mapNotNull { it.coverUri }.toSet()
+        val removed = state.value.cards.mapNotNull { it.coverUri }.toSet() - retained
         return try {
             currentCoroutineContext().ensureActive()
             // 成功路径里，取消不能把磁盘提交和内存发布拆开。失败后的对齐在下面，并且不能被取消跳过。
             withContext(NonCancellable) {
                 store.saveSpace(space)
                 mutableState.value = CardCollectionState(loading = false, cards = space.cards, groups = space.groups)
+                // 卡片提交后才回收已无引用的图片，写失败时旧封面仍可读取。
+                removed.forEach { releaseCover(it) }
             }
             true
         } catch (cancelled: CancellationException) {

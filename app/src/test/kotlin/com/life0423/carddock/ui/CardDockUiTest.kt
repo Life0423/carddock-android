@@ -41,7 +41,7 @@ class CardDockUiTest {
     fun creationAndPermissionEntryAreReachable() {
         var settingsOpened = false
         val templates = TemplateCatalog.templates + com.life0423.carddock.cainiaoEmptyTemplate
-        compose.setContent { CardDockApp(UiFixture.state(templates), UiFixture.actions(mutableListOf()), { settingsOpened = true }) }
+        compose.setContent { CardDockApp(UiFixture.state(templates), UiFixture.actions(mutableListOf()), openAccessibilitySettings = { settingsOpened = true }) }
         compose.onNodeWithTag("open_creator").performClick()
         compose.onNodeWithTag("create_card").performClick()
         compose.onNodeWithTag("tab_profile").performClick()
@@ -52,7 +52,7 @@ class CardDockUiTest {
     }
 
     @Test
-    fun navigationFilesAndResetDispatchExplicitActions() {
+    fun navigationTemplatesAndResetDispatchExplicitActions() {
         val events = mutableListOf<String>()
         compose.setContent { CardDockApp(UiFixture.state(TemplateCatalog.templates), UiFixture.actions(events)) }
 
@@ -62,9 +62,10 @@ class CardDockUiTest {
         compose.onNodeWithTag("open_creator").performClick()
 
         compose.onNodeWithTag("create_card").performClick()
-        compose.onNodeWithTag("tab_files").performClick().assertIsSelected()
+        compose.onNodeWithTag("tab_assistant").performClick().assertIsSelected()
+        compose.onNodeWithTag("tab_templates").performClick().assertIsSelected()
         compose.onNodeWithText("规则文件").assertIsDisplayed()
-        compose.captureScreen("02-files")
+        compose.captureScreen("02-templates")
 
         compose.onNodeWithTag("tab_profile").performClick().assertIsSelected()
         compose.captureScreen("04-profile")

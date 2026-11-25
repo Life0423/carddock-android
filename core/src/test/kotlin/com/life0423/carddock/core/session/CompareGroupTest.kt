@@ -19,7 +19,7 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class CompareGroupTest {
     private val originals = (1..5).map { UiFixture.card.copy(id = "card-$it", title = "卡片 $it") }
-    private val template = TemplateDefinition("test", "卡片", "测试", originals.first().kind, "读取", originals.first().rule)
+    private val template = TemplateDefinition("test", "卡片", "测试", requireNotNull(originals.first().kind), "读取", requireNotNull(originals.first().rule))
 
     @Test fun `create rename remove dissolve and restart preserve every skill`() = runTest {
         val store = MemoryCardStore(originals)
@@ -122,7 +122,11 @@ class CompareGroupTest {
         val controller = controller(store)
         controller.initialize()
         runCurrent()
-        controller.actions.createGroup("保留", listOf("card-1", "card-2"))
+        controller.actions.togglePin("card-1")
+        controller.actions.togglePin("card-3")
+        runCurrent()
+        val pinned = store.disk!!.filter { it.pinOrder != null }.sortedBy { it.pinOrder }.map { it.id }
+        controller.actions.createGroup("保留", listOf("card-2", "card-1"))
         runCurrent()
         val groups = store.groups
         controller.actions.refreshCard("card-1")
@@ -130,14 +134,39 @@ class CompareGroupTest {
         advanceTimeBy(2_000)
         runCurrent()
         assertEquals(groups, store.groups)
+        val reopened = controller(store)
+        reopened.initialize()
+        runCurrent()
+        val cards = reopened.state.value.cards
+        assertEquals(pinned, cards.filter { it.pinOrder != null }.sortedBy { it.pinOrder }.map { it.id })
+        val memberId = reopened.state.value.groups.single().memberCardIds.last()
+        val updated = cards.single { it.id == memberId }
+        assertEquals("card-1", memberId)
+        assertEquals(store.disk!!.single { it.id == "card-1" }.snapshot, updated.snapshot)
+        assertEquals(com.life0423.carddock.core.model.RunPhase.SUCCEEDED, updated.run?.phase)
         controller.actions.resetDemo()
         runCurrent()
         assertTrue(store.groups.isEmpty())
     }
 
-    private fun TestScope.controller(store: MemoryCardStore): PrototypeController {
+    @Test fun `release a shared cover when its last card is removed`() = runTest {
+        val cover = "content://pictures/shared"
+        val store = MemoryCardStore(originals.take(2).map { it.copy(coverUri = cover) })
+        val released = mutableListOf<String>()
+        val controller = controller(store) { released.add(it) }
+        controller.initialize()
+        controller.actions.setCover("card-1", null)
+        runCurrent()
+        assertTrue(released.isEmpty())
+        controller.actions.deleteCard("card-2")
+        runCurrent()
+        assertEquals(listOf(cover), released)
+    }
+
+    private fun TestScope.controller(store: MemoryCardStore, releaseCover: suspend (String) -> Unit = {}): PrototypeController {
         val rule = template.rule
         return PrototypeController(store, FixedCompiler(template),
-            RuleEngine(ObservedDevice(mapOf(rule.sourceId to rule.targetKey))), listOf(template), backgroundScope)
+            RuleEngine(ObservedDevice(mapOf(rule.sourceId to rule.targetKey))), listOf(template), backgroundScope,
+            releaseCover = releaseCover)
     }
 }

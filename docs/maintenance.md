@@ -12,16 +12,13 @@
 
 1. 在 `app/src/main/kotlin/com/life0423/carddock/demo/TemplateCatalog.kt` 的 `TemplateCatalog` 中调整规则和字段标签。
 2. 在 `app/src/main/kotlin/com/life0423/carddock/demo/DemoDeviceGateway.kt` 中调整对应固定对象的字段。场景是 `com.life0423.carddock.core.session.DemoScenario`：`NORMAL`、`NEEDS_USER`、`READ_FAILURE`、`WRONG_TARGET`。
-3. 在 `app/src/main/kotlin/com/life0423/carddock/ai/MockRuleCompiler.kt` 中维护受支持的关键词。
-4. 更新该类场景的测试，确认字段缺失、对象不匹配会失败。
+3. 更新该类场景的测试，确认字段缺失、对象不匹配会失败。
 
 模板中 `sourceId` 和 `targetKey` 必须对应实际模拟对象。设备响应返回自身观察到的目标，不能原样回显请求的目标来绕过核验。
 
-## 接入真实需求编译器
+## 模型匹配任务
 
-`RuleCompiler` 在 `core/src/main/kotlin/com/life0423/carddock/core/port/RuleCompiler.kt`。新实现放在 `app/src/main/kotlin/com/life0423/carddock/ai/`，并在 `app/src/main/kotlin/com/life0423/carddock/AppContainer.kt` 替换现在的 `MockRuleCompiler`。返回值只有 `CompileResult.Success` 和 `CompileResult.Unsupported`，不能把任意代码或脚本作为可执行结果。
-
-不符合规则或匹配不到模板时，返回 `CompileResult.Unsupported`。`RuleValidator`（`core/src/main/kotlin/com/life0423/carddock/core/rule/RuleValidator.kt`）仍会在读取设备之前拒绝未知 `schemaVersion`。API 密钥不应放进 Android 源码或 APK；真实服务接入和凭据架构需要单独设计。
+`TemplateRuleCompiler` 实现 `core` 的 `RuleCompiler`。直接选择内置模板时在本机匹配；其他任务描述由用户配置的模型从已接入模板选择。模型返回的编号核对目录后才进入 `RuleEngine` 试运行。模型连接和配置位于 `app/…/ai`，配置文件通过 Android Keystore 加密保存。模型没有设备读取入口。
 
 ## 接入真实设备
 
@@ -39,7 +36,7 @@
 - `save(cards)` 完整替换集合；失败抛出异常，不能报告部分成功。
 - 不会静默丢弃无法识别的内容；升级时显式迁移。
 
-现用实现是 `app/src/main/kotlin/com/life0423/carddock/data/AtomicFileCardStore.kt`。文件在应用私有目录，名为 `cards-v1.json`。JSON 字段是 `version`（`STORAGE_VERSION = 1`），不是一份叫 `schemaVersion` 的文件头。规则自身的版本是 `RuleSpec.schemaVersion`，`RuleValidator.SUPPORTED_SCHEMA_VERSION` 目前为 1。存储版本或规则版本不匹配时直接失败，没有历史迁移。增加字段时同时考虑 `@Serializable` 默认值与旧文件兼容测试。`AppContainer` 构造 `Json` 时设置了 `ignoreUnknownKeys = false`。
+现用实现为 `AtomicFileCardStore`。私有文件名沿用 `cards-v1.json`，文件头 `version` 当前为 3。v1 卡片和 v2 对比组支持读取；缺失的页面、置顶和封面字段使用默认值。规则自己的 `schemaVersion` 仍为 1。旧版本无法读取已写入 v3 的数据。
 
 ## 在本仓库继续开发
 

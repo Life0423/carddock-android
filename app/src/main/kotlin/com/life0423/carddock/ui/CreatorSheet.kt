@@ -64,12 +64,13 @@ internal fun CreatorSheet(
     draft: CreationDraft,
     templates: List<TemplateDefinition>,
     actions: PrototypeActions,
+    initialMeituan: Boolean = false,
 ) {
     val busy = draft.phase.isBusy()
     val canSave = draft.phase == RunPhase.SUCCEEDED && draft.preview != null && draft.title.isNotBlank()
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val focusManager = LocalFocusManager.current
-    var meituanSelected by rememberSaveable { mutableStateOf(false) }
+    var meituanSelected by rememberSaveable { mutableStateOf(initialMeituan) }
     var route by rememberSaveable { mutableStateOf("") }
     var orderNumber by rememberSaveable { mutableStateOf("") }
     val order = if (meituanSelected) MeituanOrderTarget.parse(route, orderNumber) else null
@@ -95,7 +96,7 @@ internal fun CreatorSheet(
                             actions.changePrompt("")
                             if (draft.title == MEITUAN_HISTORY) actions.changeTitle("")
                         }
-                    }, label = { Text("现有模板") }, enabled = !busy)
+                    }, label = { Text("任务模板") }, enabled = !busy)
                     FilterChip(meituanSelected, {
                         if (!meituanSelected) {
                             meituanSelected = true
@@ -126,8 +127,8 @@ internal fun CreatorSheet(
                         value = draft.prompt,
                         onValueChange = actions.changePrompt,
                         enabled = !busy,
-                        label = { Text("我想要……") },
-                        placeholder = { Text("把待取快递放到我的空间") },
+                        label = { Text("任务描述") },
+                        placeholder = { Text("选用模板，或让已配置的模型匹配") },
                         minLines = 2,
                         maxLines = 4,
                         shape = RoundedCornerShape(16.dp),
@@ -140,7 +141,7 @@ internal fun CreatorSheet(
                         templates.forEach { template ->
                             AssistChip(
                                 onClick = { actions.changePrompt(template.examplePrompt) },
-                                label = { Text(template.title) },
+                                label = { Text(if (template.rule.sourceId.startsWith("demo.")) "${template.title} · 演示" else template.title) },
                                 enabled = !busy,
                             )
                         }
@@ -176,9 +177,6 @@ internal fun CreatorSheet(
                         Modifier.padding(start = 8.dp),
                     )
                 }
-                if (busy) {
-                    Text("关闭弹层会取消本次试运行。", color = DockColors.Muted, style = MaterialTheme.typography.bodySmall)
-                }
                 if (draft.phase == RunPhase.NEEDS_USER) {
                     Text("继续后会重新读取并核验结果。", color = DockColors.Muted, style = MaterialTheme.typography.bodySmall)
                 }
@@ -193,9 +191,6 @@ internal fun CreatorSheet(
                         },
                         modifier = Modifier.testTag("creator_message"),
                     )
-                }
-                draft.template?.let { template ->
-                    Text("规则 v${template.rule.schemaVersion} · ${template.rule.sourceId}\n${template.description}", style = MaterialTheme.typography.bodySmall, color = DockColors.Muted)
                 }
                 draft.preview?.let { preview ->
                     Surface(color = DockColors.Background, shape = RoundedCornerShape(20.dp)) {
@@ -237,7 +232,7 @@ private fun CreatorHeader(onClose: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "创建功能卡",
+            "创建任务卡",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.weight(1f),

@@ -25,7 +25,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import com.life0423.carddock.platform.CardDockAccessibilityService
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -40,6 +44,9 @@ import com.life0423.carddock.ui.theme.DockColors
  */
 @Composable
 internal fun ProfileScreen(scenario: DemoScenario, actions: PrototypeActions, openAccessibilitySettings: () -> Unit = {}) {
+    val context = LocalContext.current
+    var connected by remember { mutableStateOf(CardDockAccessibilityService.instance != null) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { connected = CardDockAccessibilityService.instance != null }
     var confirmReset by remember { mutableStateOf(false) }
     LazyColumn(
         modifier = Modifier.testTag("profile_list"),
@@ -49,27 +56,21 @@ internal fun ProfileScreen(scenario: DemoScenario, actions: PrototypeActions, op
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("我的", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-                Text("探索卡坞的完整使用流程。", style = MaterialTheme.typography.bodyLarge, color = DockColors.Muted)
-            }
-        }
-        item {
-            Surface(color = DockColors.Surface, shape = RoundedCornerShape(24.dp)) {
-                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TextPill("CardDock · 原型", DockColors.Mint)
-                    Text("你的卡片，保存在这台设备", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        "主动试运行或刷新时，卡坞读取你指定的页面。应用读取结果只保存在这台设备。",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = DockColors.Muted,
-                    )
-                }
             }
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("应用页面读取", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("开启卡坞无障碍服务后，美团历史订单会在前台打开并核验。菜鸟仍需手动切到取包裹页。", style = MaterialTheme.typography.bodyMedium, color = DockColors.Muted)
+                Text(if (connected) "页面读取已连接" else "页面读取未连接",
+                    style = MaterialTheme.typography.bodyMedium, color = DockColors.Muted)
+                Text("菜鸟 · 待取空状态\n美团 · 已完成订单", style = MaterialTheme.typography.bodyMedium)
                 OutlinedButton(onClick = openAccessibilitySettings, modifier = Modifier.fillMaxWidth().testTag("accessibility_settings")) { Text("打开无障碍设置") }
+            }
+        }
+        item { ModelSettingsScreen() }
+        if (context.livePreviewAvailable()) item {
+            OutlinedButton({ context.startActivity(context.livePreviewIntent()) }, Modifier.fillMaxWidth().testTag("live_preview_experiment")) {
+                Text("应用内预览 · 真机实验")
             }
         }
         item {

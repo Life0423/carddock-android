@@ -140,10 +140,6 @@ internal class CreationController(
         val preview = current.preview ?: return
         val template = current.template ?: return
         if (current.phase != RunPhase.SUCCEEDED || current.title.isBlank() || work?.isActive == true) return
-        if (cards.state.value.cards.size >= MAX_CARDS) {
-            notify("原型最多保存 $MAX_CARDS 张卡片，请先移除不需要的卡片。")
-            return
-        }
         val token = generation
         mutableDraft.value = current.copy(phase = RunPhase.RUNNING, message = "正在保存卡片…")
         work = scope.launch {
@@ -178,6 +174,4 @@ internal class CreationController(
     }
 
     private fun RunPhase.isBusy() = this == RunPhase.QUEUED || this == RunPhase.RUNNING
-
-    private companion object { const val MAX_CARDS = 12 }
 }

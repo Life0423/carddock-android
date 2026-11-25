@@ -1,131 +1,146 @@
 package com.life0423.carddock.ui
 
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.life0423.carddock.R
 import com.life0423.carddock.core.session.PrototypeActions
 import com.life0423.carddock.core.session.PrototypeState
 import com.life0423.carddock.ui.theme.CardDockTheme
 import com.life0423.carddock.ui.theme.DockColors
 
-/**
- * UI owns only presentation state. All domain mutations are explicit callbacks.
- * 选中页用 rememberSaveable，旋转后还在原页。通知等 Snackbar 退出再清成 null，同一句才能再次投递。
- * 保存一点击就切到空间页，不等写入成功；失败时弹层仍在，底下已经是空间。
- */
+private enum class DockTab(val label: String, val tag: String, val icon: () -> ImageVector) {
+    Space("空间", "space", { DockIcons.Layers }),
+    Assistant("助手", "assistant", { Icons.Rounded.Star }),
+    Templates("模板", "templates", { DockIcons.Folder }),
+    Profile("我的", "profile", { DockIcons.PersonOutline }),
+}
+
+/** 页面只持有导航和表单状态。关闭预览后恢复空间的筛选和滚动位置。 */
 @Composable
-fun CardDockApp(state: PrototypeState, actions: PrototypeActions, openAccessibilitySettings: () -> Unit = {}) {
+fun CardDockApp(
+    state: PrototypeState,
+    actions: PrototypeActions,
+    sharedPage: String? = null,
+    onShareConsumed: () -> Unit = {},
+    openAccessibilitySettings: () -> Unit = {},
+) {
     CardDockTheme {
-        var selectedTab by rememberSaveable { mutableIntStateOf(0) }
-        val snackbarHost = remember { SnackbarHostState() }
+        var tab by rememberSaveable { mutableStateOf(DockTab.Space) }
+        var pageDraft by rememberSaveable { mutableStateOf<String?>(null) }
+        var cardId by rememberSaveable { mutableStateOf<String?>(null) }
+        var groupId by rememberSaveable { mutableStateOf<String?>(null) }
+        var orderCreator by rememberSaveable { mutableStateOf(false) }
+        var beforeSave by rememberSaveable { mutableStateOf<List<String>?>(null) }
+        val card = state.cards.firstOrNull { it.id == cardId }
+        val group = state.groups.firstOrNull { it.id == groupId }
+        val pageState = rememberSaveableStateHolder()
+        val snackbar = remember { SnackbarHostState() }
+
+        LaunchedEffect(sharedPage, state.draft, pageDraft, state.loading) {
+            if (sharedPage != null && state.draft == null && pageDraft == null && !state.loading) {
+                pageDraft = sharedPage
+                onShareConsumed()
+            }
+        }
+        LaunchedEffect(beforeSave, state.draft, state.cards) {
+            val previous = beforeSave ?: return@LaunchedEffect
+            if (state.draft != null) return@LaunchedEffect
+            val saved = state.cards.firstOrNull { it.id !in previous } ?: return@LaunchedEffect
+            tab = DockTab.Space
+            pageState.removeState(DockTab.Space.tag)
+            groupId = null
+            cardId = saved.id
+            beforeSave = null
+            orderCreator = false
+        }
         LaunchedEffect(state.notice) {
-            state.notice?.let { message ->
-                // 等到这条 Snackbar 退出再把 notice 清成 null。留着同一句时，后面的相同文案不会再次投递。
-                snackbarHost.showSnackbar(message)
+            state.notice?.let {
+                snackbar.showSnackbar(it)
                 actions.dismissNotice()
             }
         }
 
         Scaffold(
             containerColor = DockColors.Background,
-            topBar = { if (selectedTab != 0) BrandHeader() else Box(Modifier.statusBarsPadding()) },
+            snackbarHost = { SnackbarHost(snackbar) },
             bottomBar = {
-                DockNavigation(selectedTab = selectedTab, onSelect = { selectedTab = it })
+                if (card == null && group == null) NavigationBar(containerColor = DockColors.Surface, tonalElevation = 0.dp) {
+                    DockTab.entries.forEach { item ->
+                        NavigationBarItem(
+                            selected = tab == item,
+                            onClick = { tab = item },
+                            icon = { Icon(item.icon(), null) },
+                            label = { Text(item.label) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = DockColors.Mint, selectedTextColor = DockColors.Mint,
+                                indicatorColor = DockColors.Raised, unselectedIconColor = DockColors.Muted,
+                                unselectedTextColor = DockColors.Muted,
+                            ),
+                            modifier = Modifier.testTag("tab_${item.tag}"),
+                        )
+                    }
+                }
             },
-            snackbarHost = { SnackbarHost(snackbarHost) },
-        ) { contentPadding ->
-            Box(Modifier.fillMaxSize().padding(contentPadding)) {
-                if (state.loading) {
-                    CircularProgressIndicator(Modifier.align(Alignment.Center))
-                } else {
-                    when (selectedTab) {
-                        0 -> SpaceScreen(state, actions)
-                        1 -> FilesScreen(state.cards)
-                        else -> ProfileScreen(state.scenario, actions, openAccessibilitySettings)
+        ) { padding ->
+            Box(Modifier.fillMaxSize().padding(padding)) {
+                when {
+                    state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                    card != null -> PreviewWindow(card.title, { cardId = null }, closeLabel = "收起") {
+                        CardDetail(card, actions)
+                    }
+                    group != null -> pageState.SaveableStateProvider("group:${group.id}") {
+                        GroupPreview(group, state.cards, state.notice, actions, onClose = { groupId = null })
+                    }
+                    else -> pageState.SaveableStateProvider(tab.tag) {
+                        when (tab) {
+                            DockTab.Space -> SpaceScreen(state, actions,
+                                onCreatePage = { pageDraft = "" },
+                                onBrowseTemplates = { tab = DockTab.Templates },
+                                onOpenCard = { groupId = null; cardId = it },
+                                onOpenGroup = { cardId = null; groupId = it })
+                            DockTab.Assistant -> AssistantScreen(
+                                state.cards, state.groups, actions.createGroup, actions.dissolveGroup,
+                                onOpenSettings = { tab = DockTab.Profile })
+                            DockTab.Templates -> TemplatesScreen(state.cards, state.templates, actions.openCreator) {
+                                orderCreator = true
+                                actions.openCreator(null)
+                            }
+                            DockTab.Profile -> ProfileScreen(state.scenario, actions, openAccessibilitySettings)
+                        }
                     }
                 }
             }
         }
 
         state.draft?.let { draft ->
-            CreatorSheet(
-                draft = draft,
-                templates = state.templates,
-                actions = actions.copy(saveDraft = {
+            CreatorSheet(draft, state.templates, actions.copy(
+                saveDraft = {
+                    beforeSave = state.cards.map { it.id }
                     actions.saveDraft()
-                    // 先切页再等结果。写入失败时草稿还在，弹层继续盖住已经切过来的空间页。
-                    selectedTab = 0
-                }),
-            )
+                },
+                closeCreator = {
+                    beforeSave = null
+                    orderCreator = false
+                    actions.closeCreator()
+                },
+            ), initialMeituan = orderCreator)
         }
-    }
-}
-
-@Composable
-private fun BrandHeader() {
-    Row(
-        Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 22.dp, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Image(painterResource(R.drawable.carddock_logo), null, Modifier.size(38.dp))
-        Text(
-            "卡坞",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f),
-        )
-        TextPill("原型", DockColors.Amber)
-    }
-}
-
-@Composable
-private fun DockNavigation(selectedTab: Int, onSelect: (Int) -> Unit) {
-    val labels = listOf("空间", "文件", "我的")
-    val tags = listOf("space", "files", "profile")
-    val icons = listOf(DockIcons.Layers, DockIcons.Folder, DockIcons.PersonOutline)
-    NavigationBar(containerColor = DockColors.Background, tonalElevation = 0.dp) {
-        labels.forEachIndexed { index, label ->
-            NavigationBarItem(
-                selected = selectedTab == index,
-                onClick = { onSelect(index) },
-                icon = { Icon(icons[index], contentDescription = null) },
-                label = { Text(label) },
-                colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
-                    selectedIconColor = DockColors.Mint, selectedTextColor = DockColors.Mint,
-                    indicatorColor = DockColors.Background,
-                ),
-                modifier = Modifier.testTag("tab_${tags[index]}"),
-            )
+        pageDraft?.let { initial ->
+            PageCreator(initial, save = { title, target ->
+                beforeSave = state.cards.map { it.id }
+                actions.savePage(title, target).also { if (!it) beforeSave = null }
+            }, onClose = { pageDraft = null })
         }
     }
 }

@@ -66,12 +66,19 @@ data class RunInfo(
 data class CardRecord(
     val id: String,
     val title: String,
-    val kind: TemplateKind,
-    val rule: RuleSpec,
+    val kind: TemplateKind? = null,
+    val rule: RuleSpec? = null,
     val snapshot: CardSnapshot? = null,
     val run: RunInfo? = null,
     val originalPrompt: String = "",
+    val page: PageTarget? = null,
+    val pinOrder: Int? = null,
+    val coverUri: String? = null,
 )
+
+/** 用户在来源应用中确认抵达的分享链接，以及此次确认的时间。 */
+@Serializable
+data class PageTarget(val url: String, val verifiedAt: Long)
 
 /** 一条可试运行的演示模板。examplePrompt 只负责预填，编译器仍按用户最终输入分流，不按模板 id。 */
 @Serializable

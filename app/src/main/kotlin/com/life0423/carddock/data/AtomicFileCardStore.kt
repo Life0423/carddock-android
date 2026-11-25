@@ -39,7 +39,7 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
      */
     override suspend fun load(): List<CardRecord>? = loadSpace()?.cards
 
-    /** v1 没有组；读取时补空关系，下一次提交在同一文件中写入 v2。 */
+    /** v1 没有组，v2 没有页面、置顶和自选封面。缺失字段由默认值补齐。 */
     override suspend fun loadSpace(): SpaceRecords? = withContext(Dispatchers.IO) {
         lock.withLock {
             currentCoroutineContext().ensureActive()
@@ -111,7 +111,11 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
             if (card.id.isBlank() || card.title.isBlank() || !ids.add(card.id)) {
                 throw IOException("Invalid or duplicate card identity")
             }
-            RuleValidator.validate(card.rule)?.let { throw IOException("Invalid stored rule: ${it.code}") }
+            val rule = card.rule
+            if (rule == null && card.page == null || rule != null && (card.page != null || card.kind == null)) {
+                throw IOException("Invalid card target")
+            }
+            rule?.let(RuleValidator::validate)?.let { throw IOException("Invalid stored rule: ${it.code}") }
         }
         val groupIds = mutableSetOf<String>()
         val assigned = mutableSetOf<String>()
@@ -132,7 +136,7 @@ class AtomicFileCardStore(context: Context, private val json: Json) : CardStore 
 
     private companion object {
         const val FILE_NAME = "cards-v1.json"
-        const val STORAGE_VERSION = 2
+        const val STORAGE_VERSION = 3
         private val locks = ConcurrentHashMap<String, Mutex>()
 
         /**

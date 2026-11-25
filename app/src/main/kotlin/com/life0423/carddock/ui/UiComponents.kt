@@ -29,20 +29,22 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-internal fun TemplateKind.icon(): ImageVector = when (this) {
+internal fun TemplateKind?.icon(): ImageVector = when (this) {
     TemplateKind.EXPRESS -> DockIcons.Inventory2
     TemplateKind.DELIVERY -> DockIcons.LocalShipping
     TemplateKind.TRAVEL -> DockIcons.Train
+    null -> DockIcons.Folder
 }
 
-internal fun TemplateKind.accent(): Color = when (this) {
+internal fun TemplateKind?.accent(): Color = when (this) {
     TemplateKind.EXPRESS -> DockColors.Amber
     TemplateKind.DELIVERY -> DockColors.Mint
     TemplateKind.TRAVEL -> DockColors.Blue
+    null -> DockColors.Mint
 }
 
 @Composable
-internal fun KindIcon(kind: TemplateKind, modifier: Modifier = Modifier) {
+internal fun KindIcon(kind: TemplateKind?, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier.size(42.dp),
         color = kind.accent().copy(alpha = 0.12f),
@@ -121,3 +123,7 @@ internal fun SnapshotFields(fields: List<FieldValue>, modifier: Modifier = Modif
 /** 用设备默认时区和简体中文格式显示。同一毫秒在不同时区会显示成不同的钟点。 */
 internal fun formatTimestamp(epochMillis: Long): String =
     SimpleDateFormat("MM月dd日 HH:mm:ss", Locale.SIMPLIFIED_CHINESE).format(Date(epochMillis))
+
+/** 卡面用短日期留出结果空间，详情保留精确到秒的成功时间。 */
+internal fun formatShortTimestamp(epochMillis: Long): String =
+    SimpleDateFormat("MM/dd HH:mm", Locale.SIMPLIFIED_CHINESE).format(Date(epochMillis))

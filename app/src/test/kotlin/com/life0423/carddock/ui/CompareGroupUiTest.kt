@@ -4,7 +4,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -76,15 +75,15 @@ class CompareGroupUiTest {
         compose.setContent { CardDockApp(state.value, UiFixture.actions(events)) }
 
         compose.onNodeWithTag("preview_weekend").performClick()
-        compose.onNodeWithTag("member_delivery-card").performClick().assertIsSelected()
+        compose.onNodeWithTag("member_delivery-card").performClick()
         compose.onNodeWithTag("card_delivery-card").assertIsDisplayed()
         assertTrue("打开或切换成员不能自行刷新", events.isEmpty())
         compose.captureScreen("08-comparison-members")
-        compose.onNodeWithText("单独展开").performScrollTo().performClick()
         compose.onNodeWithTag("member_delivery-card").assertDoesNotExist()
         compose.onNodeWithTag("refresh_delivery-card").performScrollTo().performClick()
         compose.onNodeWithTag("preview_back").performClick()
-        compose.onNodeWithTag("member_delivery-card").performScrollTo().assertIsSelected()
+        compose.onNodeWithTag("member_delivery-card").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("manage_group").performClick()
 
         compose.onNodeWithTag("ungroup_delivery-card").performScrollTo().performClick()
         assertEquals(listOf("refresh:delivery-card", "group:remove:weekend:delivery-card"), events)
@@ -94,9 +93,10 @@ class CompareGroupUiTest {
                 groups = listOf(group.copy(memberCardIds = listOf("express-card", "travel-card"))),
             )
         }
-        compose.onNodeWithTag("member_delivery-card").assertDoesNotExist()
-        compose.onNodeWithTag("member_express-card").performScrollTo().assertIsSelected()
+        compose.onNodeWithTag("ungroup_delivery-card").assertDoesNotExist()
+        compose.onNodeWithTag("ungroup_express-card").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("dissolve_group").performScrollTo().performClick()
+        compose.onNodeWithTag("confirm_dissolve").performClick()
         assertEquals("group:dissolve:weekend", events.last())
         compose.runOnIdle { state.value = state.value.copy(groups = emptyList()) }
         compose.onNodeWithTag("preview_back").assertDoesNotExist()
@@ -111,16 +111,28 @@ class CompareGroupUiTest {
         val events = mutableListOf<String>()
         compose.setContent { CardDockApp(base.copy(groups = listOf(group)), UiFixture.actions(events)) }
 
-        compose.onNodeWithTag("category_吃喝").performClick()
         compose.onNodeWithContentDescription("搜索卡片").performClick()
         compose.onNodeWithTag("space_search").performTextInput("午餐")
         compose.onNodeWithTag("preview_weekend").assertIsDisplayed()
-        compose.onNodeWithText("组内：午餐配送").assertIsDisplayed()
         compose.onNodeWithTag("preview_delivery-card").assertDoesNotExist()
         compose.onNodeWithTag("preview_weekend").performClick()
         compose.onNodeWithTag("preview_back").performClick()
         compose.onNodeWithTag("space_search").assertTextContains("午餐")
-        compose.onNodeWithText("组内：午餐配送").assertIsDisplayed()
+        compose.onNodeWithTag("preview_weekend").assertIsDisplayed()
         assertTrue(events.isEmpty())
+    }
+
+    @Test
+    fun returningToTheSameComparisonKeepsItsGoal() {
+        compose.setContent { CardDockApp(base, UiFixture.actions(mutableListOf())) }
+        compose.onNodeWithTag("open_creator").performClick()
+        compose.onNodeWithTag("create_group").performClick()
+        compose.onNodeWithTag("select_express-card").performClick()
+        compose.onNodeWithTag("select_delivery-card").performClick()
+        compose.onNodeWithTag("compare_selected").performClick()
+        compose.onNodeWithTag("compare_goal").performTextInput("今天能用哪个")
+        compose.onNodeWithText("返回选卡").performClick()
+        compose.onNodeWithTag("compare_selected").performClick()
+        compose.onNodeWithTag("compare_goal").assertTextContains("今天能用哪个")
     }
 }

@@ -8,6 +8,7 @@ import com.life0423.carddock.core.model.CompareGroup
 import com.life0423.carddock.core.model.SpaceRecords
 import com.life0423.carddock.core.model.CardSnapshot
 import com.life0423.carddock.core.model.FieldValue
+import com.life0423.carddock.core.model.PageTarget
 import com.life0423.carddock.demo.TemplateCatalog
 import java.io.File
 import java.io.IOException
@@ -70,7 +71,7 @@ class AtomicFileCardStoreTest {
         store.save(emptyList())
 
         assertEquals(emptyList<CardRecord>(), newStore().load())
-        assertEquals("2", json.parseToJsonElement(baseFile.readText()).jsonObject.getValue("version").jsonPrimitive.content)
+        assertEquals("3", json.parseToJsonElement(baseFile.readText()).jsonObject.getValue("version").jsonPrimitive.content)
     }
 
     @Test
@@ -139,7 +140,7 @@ class AtomicFileCardStoreTest {
         newStore().saveSpace(space)
         File(baseFile.path + ".new").writeText("{ incomplete group replacement")
         assertEquals(space, newStore().loadSpace())
-        assertEquals("2", json.parseToJsonElement(baseFile.readText()).jsonObject.getValue("version").jsonPrimitive.content)
+        assertEquals("3", json.parseToJsonElement(baseFile.readText()).jsonObject.getValue("version").jsonPrimitive.content)
     }
 
     @Test
@@ -159,6 +160,29 @@ class AtomicFileCardStoreTest {
             assertThrows(IOException::class.java) { runBlocking { newStore().saveSpace(space.copy(groups = groups)) } }
             assertEquals(space, newStore().loadSpace())
         }
+    }
+
+    @Test
+    fun versionTwoKeepsSavedGroupsDuringUpgrade() = runBlocking {
+        val cards = listOf(exampleCard(), exampleCard().copy(id = "second"))
+        val groups = listOf(CompareGroup("group", "旧组", cards.map { it.id }))
+        baseFile.writeText("""{"version":2,"cards":${Json.encodeToString(cards)},"groups":${Json.encodeToString(groups)}}""")
+        val store = newStore()
+        val loaded = store.loadSpace()!!
+        assertEquals(SpaceRecords(cards, groups), loaded)
+        val pinned = loaded.copy(cards = listOf(cards[0].copy(pinOrder = 1), cards[1]))
+        store.saveSpace(pinned)
+        assertEquals(pinned, newStore().loadSpace())
+    }
+
+    @Test
+    fun pageCoverAndPinnedGroupReferenceSurviveRecreation() = runBlocking {
+        val task = exampleCard()
+        val page = CardRecord("page", "我的书架", page = PageTarget("https://example.com/books", 123L),
+            pinOrder = 1, coverUri = "content://pictures/cover")
+        val space = SpaceRecords(listOf(task, page), listOf(CompareGroup("group", "阅读", listOf(task.id, page.id))))
+        newStore().saveSpace(space)
+        assertEquals(space, newStore().loadSpace())
     }
 
     private fun newStore() = AtomicFileCardStore(context, json)
