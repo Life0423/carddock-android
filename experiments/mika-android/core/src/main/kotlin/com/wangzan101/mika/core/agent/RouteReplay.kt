@@ -11,6 +11,7 @@ import com.wangzan101.mika.core.prompt.Feedback
 import com.wangzan101.mika.core.record.RunEvent
 import com.wangzan101.mika.core.record.RunSink
 import com.wangzan101.mika.core.replay.ReplayOutcome
+import com.wangzan101.mika.core.uistate.interfaces
 import com.wangzan101.mika.core.replay.Replayer
 import com.wangzan101.mika.core.replay.Route
 import com.wangzan101.mika.core.replay.RouteMatcher
@@ -19,6 +20,8 @@ import com.wangzan101.mika.core.tool.Verb
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
@@ -42,6 +45,16 @@ internal class RouteReplay(
     /** 本次任务回放过的路线与结果。 */
     private var replayed: Pair<Route, ReplayOutcome>? = null
 
+    val completed get() = replayed?.second is ReplayOutcome.Completed
+
+    /** 展示实际断点，完整页面及工具诊断保留在同一回执里。 */
+    val failureDetail: String get() = when (val out = replayed?.second) {
+        is ReplayOutcome.Diverged -> if (out.error == "app_in_use_by_user")
+            "第 ${out.done + 1} 步：目标应用正在主屏使用，请先退出该应用后重试。"
+            else "第 ${out.done + 1} 步未匹配。预期：${out.expected.take(220)}。当前页面：${out.seen.take(140).ifBlank { "无法读取" }}。"
+        is ReplayOutcome.StoppedForConfirmation -> "第 ${out.done + 1} 步需要操作授权，浏览路线已停止。"
+        else -> "这次没有从已保存的路线读到目标页面。请检查应用或重新试查。"
+    }
     fun reset() { replayed = null }
 
     /** 交还时读屏用最近操作的那块屏的读元素工具(回放的路线落在哪块屏就读哪块)。 */
@@ -50,7 +63,7 @@ internal class RouteReplay(
     /**
      * 找路线并回放;回放过就把经过(做了哪几步、在哪对不上)和一份当前全量读屏交给模型,返回读屏里的前台 App。
      */
-    suspend fun run(task: String, history: MutableList<Message>, executor: ActionExecutor, ctx: ContextBuilder, track: StepTrack): Place? {
+    suspend fun run(task: String, history: MutableList<Message>, executor: ActionExecutor, ctx: ContextBuilder, track: StepTrack, officialEndpoint: (com.wangzan101.mika.core.uistate.ScreenSnapshot) -> Boolean = { false }): Place? {
         val choice = try {
             withContext(Dispatchers.IO) { routes.choose(task) }
         } catch (e: CancellationException) {
@@ -76,7 +89,7 @@ internal class RouteReplay(
             },
             clock = clock,
         )
-        val out = replayer.run(choice)
+        val out = replayer.run(choice, fromAppEntry = routes.pinned != null, officialEndpoint = officialEndpoint)
         replayed = choice.route to out
         update(choice.route.id) { r ->
             when (out) {
@@ -87,21 +100,28 @@ internal class RouteReplay(
                 else -> r.copy(lastUsedMs = clock())
             }
         }
+        // 固定卡片没有模型接手续办；保留原断点，避免停下后又采集意外切入的应用。
+        if (routes.pinned != null && out !is ReplayOutcome.Completed) return null
         val steps = choice.route.steps
-        val doneLines = steps.take(out.done).mapIndexed { i, st -> "${i + 1}. ${Replayer.describe(st, choice.slots)}" }.joinToString("\n")
+        val done = replayer.matchedSteps
+        val doneLines = done.joinToString("\n") { i -> "${i + 1}. ${Replayer.describe(steps[i], choice.slots)}" }
         val head = when (out) {
-            is ReplayOutcome.Completed -> Feedback.format("replay.completed", "total" to steps.size, "steps" to doneLines)
+            is ReplayOutcome.Completed -> if (out.resumedAtLastTap) "已在应用中定位到保存的页签，重新点击末步入口后已核对本次页面标识。请读取当前结果。"
+                else if (done.size < total) "已从现场核实的页面接续，实际执行了以下 ${done.size} 步。请读取当前结果。\n$doneLines"
+                else Feedback.format("replay.completed", "total" to steps.size, "steps" to doneLines)
             is ReplayOutcome.Diverged -> {
                 val error = out.error?.let { Feedback.format("replay.error_code", "code" to it) }.orEmpty()
                 val next = if (out.executed) Feedback.format("replay.diverged_executed", "step" to (out.done + 1), "expected" to out.expected, "seen" to out.seen, "error" to error)
                 else Feedback.format("replay.diverged_skipped", "step" to (out.done + 1), "expected" to out.expected, "seen" to out.seen, "error" to error)
-                Feedback.format("replay.progress", "done" to out.done, "total" to steps.size, "steps" to doneLines.ifEmpty { Feedback["replay.no_steps"] }, "next" to next)
+                Feedback.format("replay.progress", "done" to done.size, "total" to steps.size, "steps" to doneLines.ifEmpty { Feedback["replay.no_steps"] }, "next" to next)
             }
-            is ReplayOutcome.StoppedForConfirmation -> Feedback.format("replay.progress", "done" to out.done, "total" to steps.size, "steps" to doneLines.ifEmpty { Feedback["replay.no_steps"] },
+            is ReplayOutcome.StoppedForConfirmation -> Feedback.format("replay.progress", "done" to done.size, "total" to steps.size, "steps" to doneLines.ifEmpty { Feedback["replay.no_steps"] },
                 "next" to Feedback.format("replay.stopped", "step" to (out.done + 1), "action" to Replayer.describe(steps[out.done], choice.slots)))
         }
         // 当前全量读屏:模型从这里拿编号接着做;读不到就只交说明,任务照常继续
-        val looked = try {
+        val resumed = out is ReplayOutcome.Completed && out.resumedAtLastTap
+        val checkedEnd = out is ReplayOutcome.Completed && (resumed || routes.pinned != null && choice.route.packages.size == 1)
+        val looked = if (checkedEnd) replayer.lastRead else try {
             tools.executeRead(Part.ToolCall("replay_handback", dumpTool, "{}"), 0).takeIf { it.content["ok"] == JsonPrimitive(true) }
         } catch (e: CancellationException) {
             throw e
@@ -112,10 +132,31 @@ internal class RouteReplay(
         if (read != null) {
             // 读屏做成一对工具调用与结果:裁剪和「模型看得到哪几屏」按读屏工具认它,各家接口对调用和结果的配对要求也都满足
             val id = "replay_handback"
-            history += Message(Role.Assistant, listOf(Part.Text(Feedback.format("replay.handback", "head" to head, "note" to REPLAY_SCREEN_HEADER)), Part.ToolCall(id, dumpTool, "{}")), Author.Mika)
-            history += Message(Role.Tool, listOf(Part.ToolResult(id, read.toString(), isError = false, looked?.observations.orEmpty().map { it.tag })), Author.Mika)
-            // 能看图的主模型:交还时和动作之后一样看到此刻的画面
-            tools.imageNow()?.let { (png, shotId) -> history += Message(Role.User, listOf(Part.Text(Feedback["action_frame_note"]), tools.modelImage(png, shotId)), Author.Mika) }
+            val groups = if (checkedEnd) com.wangzan101.mika.core.verify.ListQuantityCheck.groups(tools.interfaces.session.lastSnapshot)
+                .filterKeys { it in choice.confirmedScope } else emptyMap()
+            val note = buildString {
+                append(REPLAY_SCREEN_HEADER)
+                if (groups.isNotEmpty()) append("\n下附本次可成行读取的清单计数。仅统计了本屏逐行可核实的条目；回答相关数量时引用相应分组，不推算其他页。")
+                if (checkedEnd && replayer.confirmedPageLabels.isNotEmpty())
+                    append("\n另附本次进入子页前现场核实的页标（含来源编号）。据此核对当前列表属于哪个对象，列表内容和状态只取本次终点读屏。")
+                if (checkedEnd && replayer.confirmedInputRead != null)
+                    append("\n另附本次较早页面回读的输入条件。可据此核对搜索词等固定输入；品牌、价格等结果取当前页面。")
+                if (checkedEnd && replayer.checkedEntryReads.any { it["source"] == JsonPrimitive("elements") })
+                    append("\n请在答复中说明截图未核实图形、实际从已核实的文字入口打开，再报告当前面板读到的结果。")
+            }
+            history += Message(Role.Assistant, listOf(Part.Text(Feedback.format("replay.handback", "head" to head, "note" to note)), Part.ToolCall(id, dumpTool, "{}")), Author.Mika)
+            val inputRead = replayer.confirmedInputRead?.takeIf { checkedEnd }
+            val evidence = JsonObject(read.toMutableMap().apply {
+                if (groups.isNotEmpty()) put("visibleRowCounts", JsonObject(groups.mapValues { JsonPrimitive(it.value.size) }))
+                if (checkedEnd && replayer.confirmedPageLabels.isNotEmpty())
+                    put("earlierVerifiedPageLabelsOnThisRun", JsonArray(replayer.confirmedPageLabels.values.toList()))
+                if (inputRead != null) put("earlierConfirmedInputOnThisRun", inputRead)
+                if (checkedEnd && replayer.checkedEntryReads.isNotEmpty())
+                    put("earlierCheckedEntryActionsOnThisRun", JsonArray(replayer.checkedEntryReads))
+            })
+            history += Message(Role.Tool, listOf(Part.ToolResult(id, evidence.toString(), isError = false, looked?.observations.orEmpty().map { it.tag })), Author.Mika)
+            // 固定路线的终点来自已核对归属的控件树。另截的图可能属于随后切入的窗口。
+            if (!checkedEnd) tools.imageNow()?.let { (png, shotId) -> history += Message(Role.User, listOf(Part.Text(Feedback["action_frame_note"]), tools.modelImage(png, shotId)), Author.Mika) }
         } else {
             history += ctx.notice(REPLAY_SOURCE, Feedback.format("replay.handback", "head" to head, "note" to REPLAY_NO_SCREEN))
         }

@@ -330,6 +330,13 @@ class ToolDispatcher internal constructor(
 
     fun readSince(mark: Int): Boolean = evidenceLog.ledger.readSince(mark)
 
+    /** 将回放当场回读的参数或已复核的视觉入口及终点写入核对账本，保留应用出处。 */
+    internal fun noteReplayRead(pkg: String, value: String, entrySource: String? = null): Observation? =
+        remember(listOf(Observation(if (entrySource != null) ObsKind.Fact else ObsKind.Read, value,
+            place = com.wangzan101.mika.core.observation.Place.app(pkg),
+            inputs = if (entrySource != null) null else com.wangzan101.mika.core.observation.InputHints(emptyList()),
+            trust = com.wangzan101.mika.core.observation.Trust.Untrusted, replayEntrySource = entrySource)), surface).singleOrNull()
+
     /** 按名字找本任务登记的工具;不认识为 null。 */
     internal fun declared(name: String): AgentTool? = registry.declared(name)
 

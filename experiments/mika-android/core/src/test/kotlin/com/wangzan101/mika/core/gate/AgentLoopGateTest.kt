@@ -325,6 +325,21 @@ class AgentLoopGateTest {
     }
 
     // 读屏没有文字、视觉模型也没给所见文字:看不出要花钱,照样点
+    @Test fun browseRouteRequiresVisualEvidenceForUnnamedNavigation() = runTest {
+        val browse = object : ApprovalSettings {
+            override fun autonomous() = false
+            override val browseRoute = true
+        }
+        for (seen in listOf("筛选", "发送")) {
+            val screen = ChatScreen().apply { png = FRAME_A; button = "" }
+            lateinit var m: StepModel
+            m = StepModel(step(OBSERVE), lookFor("右下角的图标"), { m.tapLocated()(it) }, step(failure("结束")))
+            visionLoop(m, screen, """{"bbox_2d":[800,900,990,990],"seen":"$seen"}""", "是", approvals = browse)
+                .run("只读查看分类列表")
+            assertEquals(seen, if (seen == "筛选") 1 else 0, screen.taps.size)
+        }
+    }
+
     @Test fun locatedTapWithNothingToJudgeRunsWithoutAsking() = runTest {
         val s = ChatScreen().apply { png = FRAME_A; blank = true }
         lateinit var m: StepModel

@@ -187,7 +187,7 @@ class ModelSetupScreenTest {
         compose.runOnIdle { assertEquals(null, store.provider(provider.id)!!.contextSettings["m"]) }
     }
 
-    @Test fun visionPickerOffersSameAsMainAndOffAndListsEveryModel() {
+    @Test fun visionPickerOffersPinningCurrentMainAndOffAndListsEveryModel() {
         val picked = mutableListOf<String>()
         compose.setContent {
             MikaTheme {
@@ -198,8 +198,8 @@ class ModelSetupScreenTest {
                 )
             }
         }
-        compose.onNodeWithText(ModelsCopy.VISION_SAME_NOTE).assertIsDisplayed()
-        compose.onNodeWithText(ModelsCopy.SAME_AS_MAIN).performClick()
+        compose.onNodeWithText("以后更换主模型时，看图仍使用这次验证的模型。").assertIsDisplayed()
+        compose.onNodeWithText("测试并固定当前主模型").performClick()
         compose.onNodeWithText(ModelsCopy.OFF).performClick()
         compose.onNodeWithText("DeepSeek").assertIsDisplayed()
         // 不按能力置灰

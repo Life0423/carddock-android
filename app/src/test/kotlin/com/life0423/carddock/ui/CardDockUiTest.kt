@@ -106,9 +106,8 @@ class CardDockUiTest {
         compose.captureScreen("01-space")
         compose.onNodeWithTag("tab_templates").performClick().assertIsSelected()
         compose.onNodeWithTag("library_section_1").performClick()
-        compose.onNodeWithText("暂无已下载模板").assertIsDisplayed()
-        compose.onNodeWithTag("library_section_2").performClick()
-        compose.onNodeWithText("暂无收藏模板").assertIsDisplayed()
+        compose.onNodeWithText("暂无草稿").assertIsDisplayed()
+        compose.onNodeWithText("收藏").assertDoesNotExist()
         compose.captureScreen("02-templates")
         compose.onNodeWithTag("tab_square").performClick().assertIsSelected()
 
@@ -127,26 +126,50 @@ class CardDockUiTest {
     }
 
     @Test
-    fun pickerReturnsWithNewTemplateAfterPublishing() {
-        val ready = com.life0423.carddock.cainiaoEmptyTemplate.copy(id = "created")
-        val state = mutableStateOf(UiFixture.state(listOf(ready)))
-        val actions = UiFixture.actions(mutableListOf()).copy(
-            openTemplateEditor = {
-                state.value = state.value.copy(draft = CreationDraft(
-                    personalTemplateId = ready.id, template = ready, prompt = ready.examplePrompt,
-                    title = ready.title, preview = UiFixture.snapshot, phase = RunPhase.SUCCEEDED,
-                ))
-            },
-            saveDraft = {
-                state.value = state.value.copy(draft = null, personalTemplates = listOf(PersonalTemplate(ready.id, ready)))
-            },
-        )
-        compose.setContent { CardDockApp(state.value, actions) }
+    @Config(application = android.app.Application::class)
+    fun pickerStartsMikaTrialEditorForANewTemplate() {
+        val ready = com.life0423.carddock.cainiaoEmptyTemplate
+        compose.setContent { CardDockApp(UiFixture.state(listOf(ready)), UiFixture.actions(mutableListOf())) }
         compose.onNodeWithTag("open_creator").performClick()
-        compose.onNodeWithTag("pick_template_created").assertDoesNotExist()
         compose.onNodeWithTag("picker_new_template").performClick()
-        compose.onNodeWithTag("creator_save").performClick()
-        compose.onNodeWithTag("pick_template_created").assertIsDisplayed()
+        val app = org.robolectric.RuntimeEnvironment.getApplication()
+        val intent = org.robolectric.Shadows.shadowOf(app).nextStartedActivity
+        assertEquals(MikaTasksActivity::class.java.name, intent.component?.className)
+        assertTrue(intent.getBooleanExtra("routes", false))
+    }
+
+    /** 同一存储里的实例、模板和待确认路线分别来自不同入口；菜单中删除必须再确认。 */
+    @Test
+    @Config(application = android.app.Application::class)
+    fun routeInstancesAndDraftsHaveSeparateHomes() {
+        val rows = com.wangzan101.mika.task.DockRoutes(org.robolectric.RuntimeEnvironment.getApplication())
+        val card = com.wangzan101.mika.task.DockRoute("test-card", "我的查询卡", "old",
+            phase = com.wangzan101.mika.task.DockRoute.Phase.Ready, saved = true, templateId = "test-template")
+        val template = card.copy(id = "test-template", goal = "可用的查询模板", isTemplate = true, templateId = null)
+        val draft = card.copy(id = "test-draft", goal = "未完成的试查", saved = false,
+            phase = com.wangzan101.mika.task.DockRoute.Phase.Failed)
+        listOf(card, template, draft).forEach {
+            rows.prefs.edit().putString(it.id, kotlinx.serialization.json.Json.encodeToString(
+                com.wangzan101.mika.task.DockRoute.serializer(), it)).commit()
+        }
+        try {
+            compose.setContent { CardDockApp(UiFixture.state(emptyList()), UiFixture.actions(mutableListOf())) }
+            compose.onNodeWithText(card.goal).assertIsDisplayed()
+            compose.onNodeWithText(draft.goal).assertDoesNotExist()
+            compose.onNodeWithContentDescription("${card.goal}的更多操作").performClick()
+            compose.onNodeWithText("删除卡片").performClick()
+            compose.onNodeWithText("取消").performClick()
+            compose.onNodeWithTag("tab_templates").performClick()
+            compose.onNodeWithText(template.goal).assertIsDisplayed()
+            compose.onNodeWithText(draft.goal).assertDoesNotExist()
+            compose.onNodeWithContentDescription("${template.goal}的更多操作").performClick()
+            compose.onNodeWithText("查看执行过程").performClick()
+            val app = org.robolectric.RuntimeEnvironment.getApplication()
+            assertEquals("返回模板库", org.robolectric.Shadows.shadowOf(app).nextStartedActivity.getStringExtra("back"))
+            compose.onNodeWithTag("library_section_1").performClick()
+            compose.onNodeWithText(draft.goal).assertIsDisplayed()
+            compose.onNodeWithText(template.goal).assertDoesNotExist()
+        } finally { listOf(card, template, draft).forEach { rows.remove(it.id) } }
     }
 
     @Test
@@ -167,7 +190,10 @@ class CardDockUiTest {
         )
         compose.setContent { CardDockApp(state.value, actions) }
         compose.onNodeWithTag("tab_templates").performClick()
+        compose.onNodeWithText("未核验草稿").assertDoesNotExist()
+        compose.onNodeWithTag("library_section_1").performClick()
         compose.onNodeWithText("未核验草稿").assertIsDisplayed()
+        compose.onNodeWithTag("library_section_0").performClick()
         compose.onNodeWithTag("use_template_personal-pickup").performClick()
         compose.onNodeWithText("配置卡片").assertIsDisplayed()
         compose.onNodeWithTag("creator_close").performClick()

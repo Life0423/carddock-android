@@ -11,6 +11,18 @@ Before this answer goes to the user:
 {{findings}}
 Check this: read the place again if you can, then reply with your corrected final answer. Anything you still cannot confirm, say plainly in the answer that you could not confirm it instead of stating it as fact. This check happens once; your next answer goes to the user.
 
+## pinned_goal_wording
+{{findings}}
+上面列出的词来自用户的提问，在本次页面证据里没有找到。请用用户要求的语言重新作答，只列本次结果、实际适用范围和必要的限制。逐项引用页面实际显示的值。删去复述用户提问或比较措辞的整句，包括“页面没有某某选项”这类推断。如果页面证据不足以满足某项要求，明确说明该项无法核实。不要把上面的词写成已读到的界面标签。
+
+## pinned_answer_correction
+Before this answer goes to the user:
+{{findings}}
+Correct the answer now, addressing every finding. Omit quotations of the user’s question and discussion of alternate wording. State the current scope using the labels visible on the page. Answer only the fields requested on this card. Remove unrequested details that failed the check. For each requested screen label, copy its exact text from this run inside quotation marks, for example 「screen text」. If reporting an action, cite visible evidence of its result. Put any requested translation outside the quotation. If a requested value is missing, read again or identify the missing field explicitly. Use the answer language explicitly requested in the task, even if the request itself was written in a different language.
+
+## pinned_language_nudge
+Your draft is mostly in {{answer}} and the request is written in {{user}}. Use the answer language explicitly requested on the card, or {{user}} if none was specified. Preserve screen labels as exact quotations. Return only the requested result.
+
 ## language_nudge
 Before this answer goes to the user: it is written mostly in {{answer}}, but the user's latest message is in {{user}}. Rewrite the whole answer in the language of the user's latest message. Translate what you read; keep the original only for proper names, or for labels the user must find on the screen, written as "translation (original)". Do not change any value: numbers, dates, amounts, units and names stay exactly as read. This check happens once; your next answer goes to the user.
 

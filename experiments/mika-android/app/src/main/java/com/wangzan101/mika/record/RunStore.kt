@@ -19,6 +19,9 @@ import kotlinx.serialization.json.JsonPrimitive
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption.ATOMIC_MOVE
+import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.text.SimpleDateFormat
@@ -54,8 +57,69 @@ class RunStore internal constructor(
 
     private val root = File(filesDir, "runs")
 
+    /** 取相近需求在同一应用确实点过的标签，旧答复和数值不进入新任务。 */
+    fun navigationLabels(goal: String, pkg: String): List<String> {
+        if (pkg.isBlank()) return emptyList()
+        fun pairs(text: String) = text.lowercase(Locale.ROOT).filter(Char::isLetterOrDigit).windowed(2).toSet()
+        val wanted = pairs(goal)
+        val related = list().filter { it.outcome in setOf("succeeded", "unverified") }.map { run ->
+            val previous = pairs(run.goal)
+            run to (wanted.intersect(previous).size * 2.0 / (wanted.size + previous.size).coerceAtLeast(1))
+        }.filter { it.second >= 0.70 }.sortedByDescending { it.second }
+        val entrances = linkedSetOf<String>()
+        for ((run) in related) {
+            val events = events(run.id)
+            if (events.filterIsInstance<RunEvent.OutcomeJudged>().none { it.outcome == "done" }) continue
+            val recorded = events.filterIsInstance<RunEvent.ActionTarget>()
+                .filter { it.effective && !it.protected && it.tool == "phone_tap" && it.before.packageName == pkg }
+                .mapNotNull { it.target?.name?.trim() }.filter { it.length in 2..24 && it.none(Char::isDigit) }
+                .distinct().take(6)
+            entrances.addAll(recorded)
+            // 较早版本没有动作锚点，只采用能与原应用快照对上的成功点击。
+            val taps = events.filterIsInstance<RunEvent.ModelReply>().filter { it.tool == "phone_tap" }.associateBy { it.step }
+            var screen: org.json.JSONObject? = null
+            val names = linkedSetOf<String>()
+            for (event in events.filterIsInstance<RunEvent.ToolResult>()) {
+                val data = runCatching { org.json.JSONObject(event.resultJson) }.getOrNull() ?: continue
+                val prior = screen
+                if (event.tool == "phone_tap" && prior?.optString("currentApp") == pkg && data.optBoolean("ok") && data.optBoolean("changed")) {
+                    val args = taps[event.step]?.argsJson?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
+                    if (args != null && args.optString("snapshotId").isNotEmpty() && args.optString("snapshotId") == prior.optString("snapshotId")) {
+                        val elements = prior.optJSONArray("elements")
+                        val target = (0 until (elements?.length() ?: 0)).mapNotNull { elements?.optJSONObject(it) }
+                            .firstOrNull { it.optString("ref") == args.optString("ref") }
+                        // 无文字图块也可能有经过截图定位的名称。只取该次成功点击说明中的短引文，供新任务现场核实。
+                        val name = target?.optString("name")?.trim()?.takeIf { it.length in 2..24 && it.none(Char::isDigit) }
+                        if (name != null) names.add(name) else if (target != null) {
+                            val title = Regex("[「“]([^」”]{2,24})[」”]").find(args.optString("reason"))?.groupValues?.get(1)
+                            val center = target.optJSONObject("center")
+                            if (title != null && title.none(Char::isDigit) && center != null && center.optInt("x", -1) in 0..999 && center.optInt("y", -1) in 0..999) {
+                                names.add("$title（旧图块中心约横向${center.optInt("x") / 10}%、纵向${center.optInt("y") / 10}%，请对照当前图块）")
+                            }
+                        }
+                    }
+                }
+                if (event.tool == "phone_launch_app") screen = null
+                val next = data.optJSONObject("screen") ?: data
+                if (next.has("elements")) screen = next
+            }
+            // 从启动页试查时，优先用同样从启动页开始的一条完整记录，保留其中的点击次序。
+            val launch = events.filterIsInstance<RunEvent.ActionTarget>().firstOrNull { it.tool == "phone_launch_app" && it.effective }
+            val entry = launch?.let { runCatching { org.json.JSONObject(it.argsJson) }.getOrNull() }
+            if (names.size >= 2 && entry?.optString("package") == pkg && entry.optBoolean("cold")) return names.take(6)
+            entrances.addAll(names)
+        }
+        return entrances.take(6)
+    }
+
     /** 每次运行的小结;运行记录关上时由写线程记一份(见 [RunHandle])。 */
     val metrics = RunMetricsStore(File(filesDir, RunMetricsStore.FILE_NAME))
+
+    private var livePickup: Pair<String, PickupLiveEvidence>? = null
+
+    /** 只有创建该次运行的 TaskRun 能读到这一份临时证据。历史时间线始终读取已脱敏的文件。 */
+    fun pickupEvidence(runId: String): List<RunEvent>? =
+        livePickup?.takeIf { it.first == runId }?.second?.evidence()
 
     fun open(goal: String): RunHandle {
         val start = clock()
@@ -64,7 +128,10 @@ class RunStore internal constructor(
         val id = "$stamp-$suffix"
         val dir = File(root, id)
         dir.mkdirs()
-        val handle = RunHandle(id, dir, RunSummary(id = id, goal = Redactor.text(goal), startedAtMs = start), encode, metrics::append)
+        val pickup = if (PickupDiagnostics.applies(goal)) PickupLiveEvidence() else null
+        livePickup = pickup?.let { id to it }
+        val title = Redactor.text(goal).let { if (pickup == null) it else PickupDiagnostics.text(it) }
+        val handle = RunHandle(id, dir, RunSummary(id = id, goal = title, startedAtMs = start), encode, metrics::append, pickup)
         prune()
         return handle
     }
@@ -125,12 +192,14 @@ class RunStore internal constructor(
     fun append(runId: String, e: RunEvent) {
         val dir = dirOf(runId) ?: return
         runCatching {
-            File(dir, EVENTS).appendText(RunEvent.encode(e) + "\n")
             val summaryFile = File(dir, RUN_JSON)
-            val summary = RunEvent.json.decodeFromString(RunSummary.serializer(), summaryFile.readText()).with(e)
+            val old = RunEvent.json.decodeFromString(RunSummary.serializer(), summaryFile.readText())
+            val saved = if (PickupDiagnostics.applies(old.goal)) PickupDiagnostics.event(e) else e
+            File(dir, EVENTS).appendText(RunEvent.encode(saved) + "\n")
+            val summary = old.with(saved)
             val tmp = File(dir, "$RUN_JSON.tmp")
             tmp.writeText(RunEvent.json.encodeToString(RunSummary.serializer(), summary))
-            if (!tmp.renameTo(summaryFile)) error("rename failed")
+            Files.move(tmp.toPath(), summaryFile.toPath(), ATOMIC_MOVE, REPLACE_EXISTING)
             if (e is RunEvent.OutcomeJudged) metrics.update(runId) { it.copy(judged = e.outcome) }
         }.onFailure { runCatching { Log.w(TAG, "could not append to run $runId", it) } }
     }
@@ -194,6 +263,7 @@ class RunHandle internal constructor(
     private var summary: RunSummary,
     private val encode: (ByteArray) -> ByteArray?,
     private val finished: (RunMetrics) -> Unit = {},
+    private val pickup: PickupLiveEvidence? = null,
 ) : RunSink, Closeable {
     private val lock = Object()
     private val events = ArrayDeque<RunEvent>()
@@ -211,6 +281,7 @@ class RunHandle internal constructor(
     override fun event(e: RunEvent) {
         synchronized(lock) {
             if (closing) return
+            pickup?.observe(e)
             events.addLast(e)
             lock.notifyAll()
         }
@@ -219,6 +290,7 @@ class RunHandle internal constructor(
     override fun media(mediaId: Int, png: ByteArray) {
         synchronized(lock) {
             if (closing) return
+            if (pickup != null) return
             if (frames.size >= MAX_PENDING_FRAMES) frames.removeFirst()
             frames.addLast(mediaId to png)
             lock.notifyAll()
@@ -255,7 +327,7 @@ class RunHandle internal constructor(
                 metrics.build()?.let { m -> safely("metrics") { finished(m) } }
                 return
             }
-            batch.forEach(::write)
+            batch.forEach { write(if (pickup == null) it else PickupDiagnostics.event(it)) }
             frame?.let { (id, png) -> writeFrame(id, png) }
         }
     }
@@ -284,7 +356,7 @@ class RunHandle internal constructor(
         safely("summary") {
             val tmp = File(dir, "${RunStore.RUN_JSON}.tmp")
             tmp.writeText(RunEvent.json.encodeToString(RunSummary.serializer(), summary))
-            if (!tmp.renameTo(File(dir, RunStore.RUN_JSON))) error("rename failed")
+            Files.move(tmp.toPath(), File(dir, RunStore.RUN_JSON).toPath(), ATOMIC_MOVE, REPLACE_EXISTING)
         }
     }
 

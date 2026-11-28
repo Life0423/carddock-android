@@ -70,6 +70,8 @@ data class Observation(
     val step: Int = 0,
     val atMs: Long = 0,
     val id: Int = 0,
+    /** 点击及新页标已核实的入口来源；vision 表示像素复核，elements 表示用户允许的文字备用入口。 */
+    val replayEntrySource: String? = null,
 ) {
     /** 在哪里的原样写法;没有为 null。 */
     val where: String? get() = place?.name

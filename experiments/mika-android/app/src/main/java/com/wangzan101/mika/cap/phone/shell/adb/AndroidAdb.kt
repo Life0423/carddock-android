@@ -21,7 +21,6 @@ import javax.net.ssl.SSLException
 /** Android 上的 adb 身份与 TLS:钥匙用 Keystore 里的 AES 密钥包装后放在 App 私有目录;导出密钥走平台 TLS。 */
 object AndroidAdb {
     private const val KEYSTORE = "AndroidKeyStore"
-    private const val WRAP_ALIAS = "mika_adb_key_wrap"
     private const val TAG = "MikaAdbKey"
 
     // 设备端导出时不带 context;TLS 1.3 里空 context 与不带 context 的结果相同(RFC 8446 §7.5)
@@ -49,21 +48,22 @@ object AndroidAdb {
 
     /** 钥匙文件 + 包装它的 Keystore 密钥:清掉时两样一起删。 */
     private fun keyStore(context: Context): AdbKeyStore {
-        val file = WrappedKeyFile(File(context.applicationContext.noBackupFilesDir, "adb/adbkey.bin")) { wrappingKey() }
+        val alias = context.getString(com.wangzan101.mika.R.string.adb_key_wrap_alias)
+        val file = WrappedKeyFile(File(context.applicationContext.noBackupFilesDir, "adb/adbkey.bin")) { wrappingKey(alias) }
         return object : AdbKeyStore by file {
             override fun clear() {
                 file.clear()
-                runCatching { KeyStore.getInstance(KEYSTORE).apply { load(null) }.deleteEntry(WRAP_ALIAS) }
+                runCatching { KeyStore.getInstance(KEYSTORE).apply { load(null) }.deleteEntry(alias) }
             }
         }
     }
 
-    private fun wrappingKey(): SecretKey {
+    private fun wrappingKey(alias: String): SecretKey {
         val ks = KeyStore.getInstance(KEYSTORE).apply { load(null) }
-        (ks.getKey(WRAP_ALIAS, null) as? SecretKey)?.let { return it }
+        (ks.getKey(alias, null) as? SecretKey)?.let { return it }
         val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE)
         gen.init(
-            KeyGenParameterSpec.Builder(WRAP_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+            KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setKeySize(256)

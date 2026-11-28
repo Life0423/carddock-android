@@ -427,7 +427,7 @@ internal object Grounding {
     /** 一个条目至少要有几个字(单字、标点哪屏都有,不能拿来凑数)。 */
     private const val MIN_ITEM = 2
 
-    fun check(goal: String, answer: String, screens: List<String>, today: java.time.LocalDate? = null): Result {
+    fun check(goal: String, answer: String, screens: List<String>, today: java.time.LocalDate? = null, verifyQuotedGoal: Boolean = false): Result {
         val a = canon(answer)
         val entries = screens.map { lines(listOf(it)) }
         val ls = entries.flatten()
@@ -444,6 +444,7 @@ internal object Grounding {
         /** [q] 在 [where] 这些行里:整段在某一行,或按标点空白分开的每段各在某一行(其中的数按整个数比)。 */
         fun textIn(q: String, where: List<Line>): Boolean {
             val t = norm(q)
+            if (verifyQuotedGoal && t.length == 1) return where.any { it.text == t }
             if (t.isEmpty() || where.any { t in it.text }) return true
             val pieces = q.split(PIECE_BREAK).map(::norm).filter(String::isNotEmpty)
             // 行首的序号(「5 千与千寻」)、夹在字母里的数字(AQ3A)不是数,不拿去比
@@ -469,7 +470,12 @@ internal object Grounding {
                 valueNumbers(plain, goalValues).map { Claim(Kind.Number, it.value + it.magnitude) }
         }
         val plainBody = QUOTED.replace(body, " ")
-        val bodyQuotes = quotes(body).filter { norm(it).length >= 2 && norm(it) !in goalText && !template(it, plainBody) }
+        // 点卡核验时，用户在需求里提过的标签也必须在当次读屏中出现。
+        val bodyQuotes = quotes(body).filter {
+            val label = norm(it)
+            val eligible = if (verifyQuotedGoal) label.isNotEmpty() else label.length >= 2 && label !in goalText
+            eligible && !template(it, plainBody)
+        }
         val basisQuotes = quotes(basis).filter { norm(it).length >= 2 }
         val bodyLines = body.lines().map { it.replace(EMPHASIS, "") }
         val lineClaims = bodyLines.map(::values)

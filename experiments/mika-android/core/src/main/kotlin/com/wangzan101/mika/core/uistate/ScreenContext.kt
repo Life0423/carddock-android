@@ -33,6 +33,9 @@ internal val ToolContext.interfaces: Interfaces get() = this[INTERFACES] ?: erro
 /** 分发器那个任务的界面状态(执行入口、回放按读屏判定时用)。 */
 internal val ToolDispatcher.interfaces: Interfaces get() = ctx.interfaces
 
+/** 本次任务最后向执行方交付的屏幕；用于结束时交叉核对同一商品。 */
+val ToolDispatcher.lastObservedScreen: ScreenSnapshot? get() = interfaces.session.lastSnapshot
+
 /** 每块屏的读屏状态,按能力的 id。 */
 internal val ToolContext.sessions: Map<String, ScreenSession> get() = interfaces.sessions
 

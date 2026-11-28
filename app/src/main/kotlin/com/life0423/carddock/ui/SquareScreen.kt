@@ -32,7 +32,10 @@ internal fun SquareScreen(store: SquareStore?, state: SquareState, personal: Lis
         return
     }
     var query by rememberSaveable { mutableStateOf("") }
-    var latest by rememberSaveable { mutableStateOf(false) }
+    var section by rememberSaveable { mutableIntStateOf(0) }
+    val latest = section == 1
+    val favorites = section == 2
+    val entries = if (favorites) state.favorites.filter { it.title.contains(query.trim(), ignoreCase = true) } else state.entries
     var reviewedId by rememberSaveable { mutableStateOf<String?>(null) }
     var submitted by rememberSaveable { mutableStateOf(false) }
     var unpublish by remember { mutableStateOf<SquareEntry?>(null) }
@@ -46,17 +49,18 @@ internal fun SquareScreen(store: SquareStore?, state: SquareState, personal: Lis
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         item {
-            OutlinedTextField(query, { query = it.take(80) }, singleLine = true,
+            if (!favorites) OutlinedTextField(query, { query = it.take(80) }, singleLine = true,
                 placeholder = { Text("搜索模板") }, shape = RoundedCornerShape(14.dp),
                 leadingIcon = { Icon(Icons.Rounded.Search, null) }, modifier = Modifier.fillMaxWidth(),
                 trailingIcon = { TextButton({ store.refresh(query, latest) }, enabled = !state.busy) { Text("搜索") } },
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { store.refresh(query, latest) }))
-            TabRow(if (latest) 1 else 0, containerColor = DockColors.Background) {
-                listOf("下载排行", "最新发布").forEachIndexed { index, title ->
-                    Tab(selected = latest == (index == 1), enabled = !state.busy, onClick = {
-                        latest = index == 1
-                        store.refresh(query, latest)
+            TabRow(section, containerColor = DockColors.Background) {
+                listOf("下载排行", "最新发布", "我的收藏").forEachIndexed { index, title ->
+                    Tab(selected = section == index, onClick = {
+                        section = index
+                        if (index == 2) query = ""
+                        if (index != 2) store.refresh(query, index == 1)
                     }, text = { Text(title) })
                 }
             }
@@ -73,10 +77,10 @@ internal fun SquareScreen(store: SquareStore?, state: SquareState, personal: Lis
                     OutlinedButton({ store.refresh(query, latest) }, enabled = !state.busy) { Text("重试") }
             }
         } }
-        if (state.entries.isEmpty() && !state.busy && state.message == null) item {
-            Text(if (query.isBlank()) "暂无公开模板" else "没有匹配的模板", color = DockColors.Muted)
+        if (entries.isEmpty() && !state.busy && (favorites || state.message == null)) item {
+            Text(if (query.isNotBlank()) "没有匹配的模板" else if (favorites) "暂无收藏模板" else "暂无公开模板", color = DockColors.Muted)
         }
-        itemsIndexed(state.entries, key = { _, entry -> entry.id }) { index, entry ->
+        itemsIndexed(entries, key = { _, entry -> entry.id }) { index, entry ->
             val installed = state.installed.firstOrNull { it.id == entry.id }
             val saved = state.favorites.any { it.id == entry.id }
             val owner = state.signedIn && entry.author == state.account
@@ -96,8 +100,8 @@ internal fun SquareScreen(store: SquareStore?, state: SquareState, personal: Lis
                         !state.signedIn -> openLogin()
                         else -> store.download(entry)
                     }
-                }, "square_entry_${entry.id}", first = index == 0, last = index == state.entries.lastIndex,
-                rank = if (latest) null else index + 1, extra = {
+                }, "square_entry_${entry.id}", first = index == 0, last = index == entries.lastIndex,
+                rank = if (section == 0) index + 1 else null, extra = {
                     IconButton({ if (state.signedIn) store.toggleFavorite(entry) else openLogin() }, enabled = !state.busy) {
                         Icon(if (saved) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                             if (saved) "取消收藏 ${entry.title}" else "收藏 ${entry.title}")

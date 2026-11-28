@@ -106,7 +106,7 @@ fun AboutScreen(
 
         GroupCard {
             val v = AboutCopy.checkValue(update)
-            ListRow(
+            if (!com.wangzan101.mika.BuildConfig.EMBEDDED) ListRow(
                 MikaIcons.Refresh, AboutCopy.CHECK, if (update.hasUpdate) AboutCopy.CHECK_SUB_NEW else AboutCopy.CHECK_SUB, first = true,
                 onClick = {
                     if (update.hasUpdate) sheet = AboutSheet.Update

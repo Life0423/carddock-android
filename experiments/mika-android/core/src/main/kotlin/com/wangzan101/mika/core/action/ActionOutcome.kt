@@ -53,6 +53,7 @@ fun ActionOutcome.execution(): ToolExecution = when (this) {
 internal object Refusals {
     const val SINGLE_USE = "One approval lets through only the next matching action, and that action uses it up whether it succeeds or not."
     const val OWN_APP = "own_app"
+    const val TARGET_UNRESOLVED = "target_unresolved"
     const val PAYMENT_TAKEOVER = "The user completes payment with their own hands; do not use request_confirmation: after opening the payment page, call hand_to_user(reason=payment), " +
         "with item as the product (variant, quantity), amount as the amount due shown on screen, and address as the delivery address."
 
@@ -63,7 +64,9 @@ internal object Refusals {
                 "Do not retry this action in this run; explain the limitation to the user.") {
             hit?.let { put("action", it.action.name); put("matched", it.matched) }
             put("counts_as_failure", false)
-        } else if (hit == null) notRun(code, if (code == OWN_APP) Feedback["own_app"] else code) else {
+        } else if (code == TARGET_UNRESOLVED) notRun(code,
+            "The target could not be identified as safe. Nothing was clicked. Use the refreshed screen to find a clearly labeled read-only target or another browsing path. Select a label visible in the new snapshot and use its snapshotId. Never guess coordinates.")
+        else if (hit == null) notRun(code, if (code == OWN_APP) Feedback["own_app"] else code) else {
             val blocked = if (reason != null) mismatch(hit, reason) else required(hit)
             if (before.isEmpty()) blocked else JsonObject(blocked + ("guard" to JsonArray(before.map { it.toJson() })))
         }

@@ -19,6 +19,7 @@ android {
         applicationId = "com.wangzan101.mika"
         minSdk = 30
         targetSdk = 35
+        buildConfigField("boolean", "EMBEDDED", "false")
         versionCode = 39
         versionName = "0.1.38"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

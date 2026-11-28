@@ -96,7 +96,7 @@ sealed interface RunEvent {
 
     /** 回放路线走到第 [step]/[total] 步;[matched] 为 false 表示在此交还给模型。 */
     @Serializable @SerialName("replay")
-    data class Replay(override val atMs: Long, val routeId: String, val step: Int, val total: Int, val matched: Boolean, val detail: String) : RunEvent
+    data class Replay(override val atMs: Long, val routeId: String, val step: Int, val total: Int, val matched: Boolean, val detail: String, val skipped: Boolean = false) : RunEvent
 
     /** 一批动作走到第 [step]/[total] 步;[stopped] 时 [reason] 说明为何停在这里。 */
     @Serializable @SerialName("batch")
@@ -143,15 +143,18 @@ sealed interface RunEvent {
         override val atMs: Long, val step: Int, val text: String, val id: Int = 0, val kind: String = ObsKind.Read.wire,
         val source: String? = null, val place: Place? = null, val title: String? = null,
         val inputs: List<String>? = null, val focused: String? = null, val untrusted: Boolean = false,
+        val verifiedVisualAction: Boolean = false, // 旧回执只记录通过像素复核的入口。
+        val replayEntrySource: String? = null,
     ) : RunEvent {
         /** 换回一条观察。 */
         fun observation() = Observation(ObsKind.ofWire(kind) ?: ObsKind.Read, text, source, place, title,
-            trust = if (untrusted) Trust.Untrusted else Trust.Trusted, inputs = inputs?.let { InputHints(it, focused) }, step = step, atMs = atMs, id = id)
+            trust = if (untrusted) Trust.Untrusted else Trust.Trusted, inputs = inputs?.let { InputHints(it, focused) }, step = step,
+            atMs = atMs, id = id, replayEntrySource = replayEntrySource ?: "vision".takeIf { verifiedVisualAction })
 
         companion object {
             /** 账本里记下的一条观察。 */
             fun of(o: Observation) = Observed(o.atMs, o.step, o.text, o.id, o.kind.wire, o.source, o.place, o.title,
-                o.inputs?.names, o.inputs?.focused, o.trust == Trust.Untrusted)
+                o.inputs?.names, o.inputs?.focused, o.trust == Trust.Untrusted, replayEntrySource = o.replayEntrySource)
         }
     }
 

@@ -21,6 +21,8 @@ data class RunSpec(
     val readOnly: Boolean = false,
     val parent: RunId? = null,
     val stepBudget: Int? = null,
+    /** 卡片试查和复用仅开放后台手机浏览动作。 */
+    val browseRoute: Boolean = false,
 ) {
     init { require(goal.isNotBlank() && threadId.isNotBlank()) }
 }

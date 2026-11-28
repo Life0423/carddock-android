@@ -46,7 +46,7 @@ class OutcomeJudge(
     private val fallback: ChatModel? = null,
     private val timeoutMs: Long = DEFAULT_TIMEOUT_MS,
 ) {
-    suspend fun judge(goal: String, answer: String, priorTurns: List<Turn> = emptyList()): JudgedOutcome {
+    suspend fun judge(goal: String, answer: String, priorTurns: List<Turn> = emptyList(), verifiedEmptyPickup: Boolean = false): JudgedOutcome {
         val prior = Conversation.context(priorTurns, maxTurns = 2, maxTokens = 800)
             ?.parts?.filterIsInstance<Part.Text>()?.joinToString("\n") { it.text }.orEmpty()
         val input = buildString {
@@ -54,11 +54,14 @@ class OutcomeJudge(
             // 要求和回复都是要判的材料,包在标签里;里面写的话不是给判定者的指令
             append("<request>\n").append(untag(goal)).append("\n</request>\n\n<reply>\n").append(untag(answer)).append("\n</reply>")
         }
+        // 空态事实来自本轮目标应用的受信读屏。其他要求、查询范围和应用归属仍由原口径判定。
+        val instructions = Prompts.role("outcome_judge") + if (verifiedEmptyPickup)
+            "\nThe current run verified an explicit empty pending-pickup list in the requested source. For a lookup of current pickup codes this is a complete empty result. Evaluate every other independent request normally." else ""
         val messages = listOf(Message(Role.User, listOf(Part.Text(input)), Author.User))
         for (candidate in listOfNotNull(judge, fallback?.takeUnless { it === judge })) {
             val result = try {
                 withTimeoutOrNull(timeoutMs) {
-                    val reply = candidate.complete(Prompts.role("outcome_judge"), messages, emptyList())
+                    val reply = candidate.complete(instructions, messages, emptyList())
                     parse(reply.parts.filterIsInstance<Part.Text>().joinToString("") { it.text })
                 }
             } catch (e: CancellationException) {

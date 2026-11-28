@@ -16,7 +16,6 @@ import com.wangzan101.mika.MikaApp
 import com.wangzan101.mika.R
 import com.wangzan101.mika.chat.ConversationStore
 import com.wangzan101.mika.core.agent.Turn
-import com.wangzan101.mika.ui.MainActivity
 import com.wangzan101.mika.core.trigger.Scheduled
 import com.wangzan101.mika.core.trigger.TriggerDefinition
 import com.wangzan101.mika.core.trigger.TriggerEngine
@@ -222,7 +221,7 @@ object TriggerRuntime {
         if (conversations.turns(trigger.threadId).none { it.runId == runId }) {
             conversations.append(trigger.threadId, Turn(trigger.goal, text, "succeeded", runId = runId))
         }
-        notifyLocal(context, trigger.threadId, key, tr(R.string.trigger_reminder), text)
+        notifyLocal(context, trigger.threadId, key, runId, tr(R.string.trigger_reminder), text)
         store.mark(key, TriggerWindowState.Delivered)
         store.retireDeliveredOneShots()
     }
@@ -238,7 +237,7 @@ object TriggerRuntime {
         if (conversations.turns(trigger.threadId).none { it.runId == runId }) {
             conversations.append(trigger.threadId, Turn(trigger.goal, message, "failed", runId = runId))
         }
-        notifyLocal(context, trigger.threadId, key, tr(R.string.trigger_not_started), message)
+        notifyLocal(context, trigger.threadId, key, runId, tr(R.string.trigger_not_started), message)
     }
 
     private fun hasSavedResult(context: Context, key: String): Boolean =
@@ -253,22 +252,19 @@ object TriggerRuntime {
         if (conversations.turns(trigger.threadId).none { it.runId == runId }) {
             conversations.append(trigger.threadId, Turn(trigger.goal, message, "unverified", runId = runId))
         }
-        notifyLocal(context, trigger.threadId, key, tr(R.string.trigger_unconfirmed), message)
+        notifyLocal(context, trigger.threadId, key, runId, tr(R.string.trigger_unconfirmed), message)
     }
 
-    private fun notifyLocal(context: Context, threadId: String, key: String, title: String, text: String) {
+    private fun notifyLocal(context: Context, threadId: String, key: String, runId: String, title: String, text: String) {
         val notifications = context.getSystemService(NotificationManager::class.java)
         TaskService.ensureChannels(context)
-        val open = PendingIntent.getActivity(context, key.hashCode(),
-            Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or
-                Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                .putExtra(MainActivity.EXTRA_OPEN_CONVERSATION, threadId),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val notice = TaskNotice(threadId, recordId = runId)
         if (notifications.areNotificationsEnabled()) {
-            runCatching { notifications.notify(key.hashCode(), Notification.Builder(context, TaskService.CHANNEL_RESULT)
+            runCatching { notifications.notify(key.hashCode(), notice.dockNotification(context, TaskService.CHANNEL_RESULT, title)
+                ?: Notification.Builder(context, TaskService.CHANNEL_RESULT)
                 .setSmallIcon(R.drawable.ic_notification).setContentTitle(title)
                 .setContentText(text).setStyle(Notification.BigTextStyle().bigText(text))
-                .setContentIntent(open).setAutoCancel(true).build()) }
+                .setContentIntent(notice.pending(context)).setAutoCancel(true).build()) }
                 .onFailure { Log.w("MikaTrigger", "reminder notification failed", it) }
         }
     }

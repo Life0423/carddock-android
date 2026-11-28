@@ -21,6 +21,8 @@ data class ModelOption(
     val chat: Boolean? = null,
     val typed: Boolean = false,
     val visionByUser: Boolean? = null,
+    val declaredVision: Boolean? = null,
+    val imageTested: Boolean = false,
 ) {
     /** 供参考的能力标记;用户选模型时不按它们过滤。 */
     val canBeMain: Boolean get() = capabilities.toolCalls
@@ -45,6 +47,7 @@ object ModelOptions {
             ),
             toolCallsKnown = m.toolCalls != null,
             visionKnown = m.vision != null,
+            declaredVision = m.vision,
             contextKnown = m.contextTokens != null,
             displayName = m.displayName,
             chat = m.chat,
@@ -111,8 +114,8 @@ object ModelOptions {
      * 用户说过能不能看图的([Provider.visionOverrides])按用户说的。
      */
     fun ofProvider(p: Provider, configs: List<ProviderConfig>): List<ModelOption> = listedOf(p, configs).map { o ->
-        val said = p.visionOverrides[o.id] ?: return@map o
-        o.copy(capabilities = o.capabilities.copy(vision = said), visionByUser = said)
+        val said = p.visionOverrides[o.id]
+        o.copy(capabilities = o.capabilities.copy(vision = said ?: o.canSee), visionByUser = said, imageTested = o.id in p.imageTestedModels)
     }
 
     private fun listedOf(p: Provider, configs: List<ProviderConfig>): List<ModelOption> {

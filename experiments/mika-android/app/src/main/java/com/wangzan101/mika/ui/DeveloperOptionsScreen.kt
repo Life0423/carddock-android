@@ -73,7 +73,7 @@ fun DeveloperOptionsScreen(
         SwitchGroup(DeveloperSwitches.speed(speed), onSpeed)
         GroupLabel(tr(R.string.dev_experiments))
         SwitchGroup(DeveloperSwitches.experimental(speed), onSpeed)
-        if (com.wangzan101.mika.BuildConfig.DEBUG) {
+        if (com.wangzan101.mika.BuildConfig.DEBUG && !com.wangzan101.mika.BuildConfig.EMBEDDED) {
             val context = androidx.compose.ui.platform.LocalContext.current
             GroupCard {
                 ListRow(null, "第一阶段 · 功能重组器", "日常空间、模板创建与本地卡片刷新", first = true, onClick = {

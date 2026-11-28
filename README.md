@@ -7,8 +7,20 @@
 把散落在各个 App 的功能，重组成属于你自己的卡片空间。
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Android](https://img.shields.io/badge/Android-8.0%2B-brightgreen.svg)](https://developer.android.com/about/versions/oreo/android-8.0)
+[![Android](https://img.shields.io/badge/Android-11%2B-brightgreen.svg)](https://developer.android.com/about/versions/11)
 [![GitHub](https://img.shields.io/badge/GitHub-Life0423%2Fcarddock--android-181717?logo=github)](https://github.com/Life0423/carddock-android)
+
+## beta.37 单 APK
+
+卡坞内置 Mika v0.1.38。在「空间 → 新建卡片」输入需求，点「让 Mika 试查」即可切去使用其他应用。回卡坞查看本次结果和实际查询范围，接受口径后再独立验证路线。验证通过后保存为模板，点「创建并运行」生成一张卡并读取当次结果。同一模板可建多张卡，每张卡各自保留参数和核对时间。以后在空间点「重新查询」即可重跑。一次性需求可从「自由操作」提交，成功后可从原回执生成候选模板。
+
+覆盖旧版 请使用相同签名。Android 11 可以安装，操作其他手机应用需要 Android 12 或更高版本；Android 14 起虚拟屏支持独立焦点。自由操作的无障碍组件名为「卡坞 · Mika 自由操作」，旧卡沿用「页面核验」。已有卡坞模型和本机配对配置会在升级后复用。
+
+模板库分为「模板」和「草稿」。从试查答复的「查看执行过程」可以查看本次运行的步骤和核对结果。从「我的 → 手机助手」查看 Mika 使用的配对和连接状态；旧卡的页面核验助手有独立入口。
+
+在已配置卡坞内测签名的构建环境执行 `./gradlew :app:assembleBeta -PcarddockVersionCode=38 -PcarddockVersionName=0.2.0`。根工程使用 Android SDK Platform 36。
+
+## 早期原型记录
 
 开源、不上架、不收费。根目录的 `0.1.0-prototype` 保留三个模拟模板，并接入菜鸟待取空状态的真机只读模板。它把需求转成可检查的规则，先试运行、再保存到个人空间，后续刷新直接执行已保存的规则。
 
@@ -40,9 +52,9 @@
 ### Android Studio
 
 1. 解压整个工程，在 Android Studio 中打开本目录。
-2. 为 Gradle 选择 JDK 17，安装 Android SDK Platform 35。
+2. 为 Gradle 选择 JDK 17，安装 Android SDK Platform 36。
 3. 等待 Gradle 同步完成，选择 `app` 的 `debug` 变体。
-4. 在 Android 8.0 / API 26 或更高版本的设备、模拟器上运行。
+4. 在 Android 11 / API 30 或更高版本的设备、模拟器上运行。
 
 工程包含标准 Gradle Wrapper，首次构建需要下载工具链依赖。
 

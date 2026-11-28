@@ -142,7 +142,15 @@ class ActionExecutor(
             is Decision.Required -> return blocked(call, args, origin, before, d.hit, null, followUp)
             is Decision.Mismatch -> return blocked(call, args, origin, before, d.hit, d.reason, followUp)
             is Decision.Denied -> return approvalUnavailable(call, args, origin, before, d.hit, followUp)
-            Decision.Unresolved -> return refuse("target_unresolved", origin, before)
+            Decision.Unresolved -> {
+                val denied = refuse(Refusals.TARGET_UNRESOLVED, origin, before)
+                if (origin.policy.recordsRefusal) {
+                    followUp.refused(denied.content)
+                    recorder.result(origin.step, call.name, verb, denied.content, tools.portRecord(call.name, args),
+                        null, null, 0, origin.policy.source, call.id)
+                }
+                return denied
+            }
             Decision.OwnApp -> return ownApp(call, args, origin, before, followUp)
             else -> Unit
         }

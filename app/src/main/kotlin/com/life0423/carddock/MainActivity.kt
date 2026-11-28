@@ -21,9 +21,36 @@ import java.io.PrintWriter
  * 纸色界面使用深色系统栏图标。
  */
 class MainActivity : ComponentActivity() {
+    companion object {
+        internal const val SHOW_ROUTE_SPACE = "com.life0423.carddock.SHOW_ROUTE_SPACE"
+        internal const val SHOW_ROUTE_DRAFTS = "com.life0423.carddock.SHOW_ROUTE_DRAFTS"
+    }
+    private val routeSpaceRequest = androidx.compose.runtime.mutableIntStateOf(0)
+
+    private val routeDrafts = androidx.compose.runtime.mutableStateOf(false)
+
+    /** 同一 Activity 重用时也把后台任务带回所属分页。 */
+    private fun openRoutePage(action: String?) {
+        if (action == SHOW_ROUTE_SPACE || action == SHOW_ROUTE_DRAFTS) {
+            routeDrafts.value = action == SHOW_ROUTE_DRAFTS
+            routeSpaceRequest.intValue++
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        openRoutePage(intent.action)
+    }
+
     /** 真机验收可从系统 dump 读取阶段，无需在试运行中启动会暂停无障碍服务的界面取树工具。 */
     override fun dump(prefix: String, fd: FileDescriptor?, writer: PrintWriter, args: Array<out String>?) {
         // 仅输出路线和时间，独立核验不读取卡名、订单或前台用户的界面内容。
+        if (args?.singleOrNull() == "carddock-helper") {
+            val phone = (application as CardDockApplication).phone
+            writer.println("CardDockHelper paired=${phone.shellControl.paired} state=${phone.shellControl.status.value} " +
+                "connected=${phone.hub.shell.value != null} stage=${phone.shellManager.lastHelperLaunchStage}")
+            return
+        }
         if (args?.singleOrNull() == "carddock-meal") {
             writer.println((application as CardDockApplication).container.nativeDevice.lastMealStartup)
             return
@@ -48,8 +75,16 @@ class MainActivity : ComponentActivity() {
         (application as CardDockApplication).container.dockWindowFocused = hasFocus
     }
 
+    override fun onStart() {
+        super.onStart()
+        com.wangzan101.mika.quit.MikaQuit.resume(this)
+        // 已配对的同一看门狗也供后台任务使用；回来时仅唤醒已有连接，不重新配对。
+        (application as CardDockApplication).phone.shellManager.engine.need()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) openRoutePage(intent.action)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.DKGRAY),
             navigationBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.DKGRAY),
@@ -84,6 +119,7 @@ class MainActivity : ComponentActivity() {
                 saveMeituanRoute = container::saveMeituanRoute,
                 pageReaderConnected = readerConnected.value,
                 mikaConnected = assistant.value != null,
+                routeSpaceRequest = routeSpaceRequest.intValue, routeDrafts = routeDrafts.value,
             )
         }
     }

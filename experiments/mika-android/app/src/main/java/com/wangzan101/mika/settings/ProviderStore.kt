@@ -146,6 +146,8 @@ data class Provider(
     val contextSettings: Map<String, ModelContextSettings> = emptyMap(),
     /** 用户说的某个模型能不能看图(按模型名):比列表和预设初值都算数,见 [ModelOptions.seesImages]。 */
     val visionOverrides: Map<String, Boolean> = emptyMap(),
+    /** 在此服务商实际读对过测试图片的模型。 */
+    val imageTestedModels: Set<String> = emptySet(),
 ) {
     val key: String get() = ProviderConnection.keyOf(kind, baseUrl, name)
 
@@ -563,16 +565,38 @@ class ProviderStore(
      * [session] 是这次调用属于的对话(同一段对话里建的模型都给同一个);服务商声明了会话头的,每个请求都带上它。
      */
     fun modelFor(role: ModelRole, session: ModelSession = ModelSession.fresh()): ChatModel? = configFor(role)?.let { cfg ->
+        modelClient(cfg, role, session, _roles.value.reasoningEffort(role))
+    }
+
+    /** 仅在图片答案核实后调用：固定已测模型，只增补这一条目录数据，保留其余用途及档位。 */
+    @Synchronized
+    internal fun activateVerifiedVision(cfg: ProviderConfig, listed: ListedModel?): Boolean {
+        val p = provider(cfg.providerId) ?: return false
+        if (!use(ModelRole.Vision, p.id, cfg.model, cfg.capabilities)) return false
+        val updated = p.copy(
+            models = if (listed != null && p.models.orEmpty().none { it.id == listed.id }) p.models.orEmpty() + listed else p.models,
+            typedModels = if (listed == null) p.typedModels + cfg.model else p.typedModels,
+            verifiedModels = p.verifiedModels + cfg.model, imageTestedModels = p.imageTestedModels + cfg.model, savedUntested = false,
+        )
+        _providers.value = _providers.value.map { if (it.id == p.id) updated else it }
+        writeConfig()
+        return true
+    }
+
+    /** 候选模型还未占用看图用途，沿用正式调用的协议、鉴权、代理和计量。 */
+    internal fun visionCandidate(cfg: ProviderConfig, effort: String?, listed: ListedModel?): ChatModel =
+        modelClient(cfg.copy(capabilities = cfg.capabilities.copy(vision = true)), ModelRole.Vision, ModelSession.fresh(), effort, listed)
+
+    private fun modelClient(cfg: ProviderConfig, role: ModelRole, session: ModelSession, effort: String?, listed: ListedModel? = listedOf(cfg)): ChatModel {
         val p = provider(cfg.providerId)
         val source = UsageSource(cfg.providerId, p?.name ?: cfg.name, cfg.model, UsagePurpose.of(role))
-        val listed = listedOf(cfg)
         val settings = p?.contextSettings?.get(cfg.model)
         val configured = if (settings == null) cfg else cfg.copy(capabilities = cfg.capabilities.copy(
             contextTokens = settings.windowTokens ?: cfg.capabilities.contextTokens,
             compactionTriggerTokens = settings.triggerTokens,
         ))
-        modelFactory(configured, apiKey(cfg.id), listed?.endpoint, ClientSetup(
-            headers(p?.sessionHeader, session), reasoningEffort = _roles.value.reasoningEffort(role),
+        return modelFactory(configured, providerKey(cfg.providerId), listed?.endpoint, ClientSetup(
+            headers(p?.sessionHeader, session), reasoningEffort = effort,
             thinkingTypes = listed?.thinkingTypes, readTimeoutSeconds = settings?.readTimeoutSeconds,
         )).metered(source, usage)
     }
@@ -952,6 +976,7 @@ class ProviderStore(
         sessionHeader = o["sessionHeader"]?.jsonPrimitive?.content ?: ProviderPresets.forBaseUrl(o.str("baseUrl"))?.sessionHeader,
         signIn = o["signIn"]?.jsonPrimitive?.content,
         verifiedModels = o["verifiedModels"]?.jsonArray?.map { it.jsonPrimitive.content }?.toSet().orEmpty(),
+        imageTestedModels = o["imageTestedModels"]?.jsonArray?.map { it.jsonPrimitive.content }?.toSet().orEmpty(),
         contextSettings = (o["contextSettings"] as? JsonObject).orEmpty().mapNotNull { (model, raw) ->
             val entry = raw as? JsonObject ?: return@mapNotNull null
             val settings = ModelContextSettings(entry.positiveInt("windowTokens"), entry.positiveInt("triggerTokens"),
@@ -1037,6 +1062,7 @@ class ProviderStore(
                         p.sessionHeader?.let { put("sessionHeader", it) }
                         p.signIn?.let { put("signIn", it) }
                         if (p.savedUntested) put("untested", true)
+                        if (p.imageTestedModels.isNotEmpty()) putJsonArray("imageTestedModels") { p.imageTestedModels.forEach { add(it) } }
                         if (p.verifiedModels.isNotEmpty()) putJsonArray("verifiedModels") { p.verifiedModels.forEach { add(it) } }
                         if (p.contextSettings.isNotEmpty()) putJsonObject("contextSettings") {
                             for ((model, settings) in p.contextSettings) putJsonObject(model) {

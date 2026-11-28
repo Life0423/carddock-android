@@ -39,6 +39,7 @@ internal class AnswerReview(
     private val verifier: Verifier?,
     private val emit: (RunEvent) -> Unit,
     private val now: () -> Long,
+    private val pinnedCard: Boolean = false,
 ) {
     /** 产品路径只整理出处，不再为收尾答复发起另一轮核查。 */
     suspend fun sourcesOnly(goal: String, answer: String, media: Map<Int, List<Int>>): List<AnswerSource> =
@@ -65,11 +66,15 @@ internal class AnswerReview(
         // 字面核对只看账本(最近一次读取已在里面),不重新读;要请核查模型时才重新读此刻的界面
         val read = tools.evidence(fresh = false)
         val sources = AnswerSources.of(read.ledger, goal, answer, media)
-        val g = Grounding.check(goal, answer, read.sources(read.ledger.forAnswer(goal, answer)), read.today)
+        val g = Grounding.check(goal, answer, read.sources(read.ledger.forAnswer(goal, answer)), read.today, verifyQuotedGoal = pinnedCard)
         val gaps = g.unmatched.map { it.text }.distinct()
         val risky = facts.outward || facts.unreadChange
         emit(RunEvent.AnswerCheck(now(), step, g.claims.size, gaps.map(::detail), risky))
         val literalOk = gaps.isEmpty() && g.claims.isNotEmpty()
+        // 点卡回放已经读屏，答复却没有任何可核实的值时，让模型补上本次证据。
+        if (pinnedCard && g.claims.isEmpty()) {
+            return Review(objections = listOf("答复缺少可与本次页面核对的原文或数值。"), sources = sources, verified = false)
+        }
         if (!risky && gaps.isEmpty()) return Review(sources = sources, reviewed = literalOk, verified = literalOk)
         if (v == null) return Review(gaps = gaps, sources = sources, reviewed = literalOk || gaps.isNotEmpty(), verified = literalOk)
         verifying()

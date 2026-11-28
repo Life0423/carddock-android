@@ -23,6 +23,10 @@ data class Selector(
     val bounds: List<Int>,
     val ordinal: Int,
     val uniqueAtRecord: Boolean = false,
+    val visualDescription: String? = null,
+    /** 试查曾在此点击前截图核对目标。回放须用本轮像素及点击后的新页标重新核实。 */
+    val requireVisualCheck: Boolean = false,
+    val productLabel: String? = null,
 )
 
 /** 一屏的锚点:前台包名 + 最多 [RouteAnchors.MAX] 段稳定文字。 */
@@ -47,7 +51,25 @@ data class Route(
     val missStep: Int? = null,
     val disabled: Boolean = false,
     val lastUsedMs: Long,
+    val terminalLabels: Set<String> = emptySet(),
+    val navigationPeers: Set<String> = emptySet(),
+    val navigationTabIndex: Int? = null,
+    /** 原动作前的完整画面证明该容器与用户参数无关。老路线须从复验回执补证。 */
+    val verifiedAnonymousEntrance: Boolean = false,
+    /** 历史点击前缺稳定帧时，本次必须看到终点字段出现，或看到目标页签被选中。 */
+    val requireLiveTabEvidence: Boolean = false,
+    /** 连续返回后、下一次点击之前，同一行中按从左到右排列的按钮名。 */
+    val entryButtonRow: List<String> = emptyList(),
 )
+
+/** 页签后只允许原有滚动及末尾重新打开同一应用；重开后仍要核对终点。 */
+internal fun Route.hasNavigationTail(tab: Int): Boolean = steps.withIndex().drop(tab + 1).all { (i, step) ->
+    if (step.tool == "phone_scroll") return@all true
+    if (i != steps.lastIndex || step.tool != "phone_launch_app") return@all false
+    val args = runCatching { Json.parseToJsonElement(step.argsJson) as? JsonObject }.getOrNull() ?: return@all false
+    args["package"] == JsonPrimitive(packages.singleOrNull()) && args.keys.all { it in setOf("package", "reason", "cold") } &&
+        (args["cold"] == null || args["cold"] == JsonPrimitive(false))
+}
 
 /** 路线的大小上限:步数和落盘字节数。 */
 const val MAX_ROUTE_STEPS = 60
@@ -72,16 +94,32 @@ object RouteCodec {
 
 /** 从读屏里取选择器和锚点。 */
 object RouteAnchors {
+    /** 录制已知固定导航词，也用于限制像素未确认后可走的只读文字入口。 */
+    internal val navigationLabels = setOf("搜索", "筛选", "返回", "取件码", "待取件", "待取", "我的", "全部")
     const val MAX = 3
     private const val MAX_LEN = 12
     /** 数字、时间、金额一类每次都可能变,不当锚点。 */
     private val VOLATILE = Regex("[0-9０-９¥￥$€£%]")
     private val LIST_ROLES = setOf("list", "grid", "recycler", "scroll")
 
+    /** 条款与系统权限属于用户决定，初次试查里的同意操作不能成为固定路线。 */
+    private val USER_CONSENT = setOf(
+        "同意", "我同意", "同意并继续", "同意并使用", "同意并进入", "允许", "全部允许", "始终允许",
+        "仅在使用中允许", "仅在使用该应用时允许", "仅此一次", "agree", "accept", "allow", "while using the app", "only this time")
+    fun requiresUserConsent(label: String) = label.trim().lowercase() in USER_CONSENT
+
     fun stable(text: String): Boolean {
         val t = text.trim()
         return t.length in 1..MAX_LEN && !VOLATILE.containsMatchIn(t)
     }
+
+    /** 录制与回放都用千分坐标中的同行按钮辨认入口，忽略屏幕像素和控件编号。 */
+    internal fun buttonRows(nodes: Sequence<Triple<String, String, List<Int>>>): List<List<String>> =
+        nodes.filter { (role, name, box) ->
+            (role.equals("button", true) || role.equals("tab", true)) && stable(name) && box.size == 4
+        }.groupBy { (_, _, box) -> box[1] to box[3] }.values.map { row ->
+            row.sortedBy { it.third[0] }.map { it.second.trim() }.distinct()
+        }.filter { it.size >= 3 }
 
     private fun container(e: UiElement) = e.scrollable || e.role.lowercase() in LIST_ROLES
 

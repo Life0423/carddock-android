@@ -84,6 +84,7 @@ data class PrototypeActions(
     val changeTemplateDescription: (String) -> Unit = {},
     val keepTemplateDraft: () -> Unit = {},
     val deleteTemplate: (String) -> Unit = {},
+    val discardTemplateDraft: (String) -> Unit = {},
     val changeRouteOid: (String) -> Unit = {},
     val changeOrderNumber: (String) -> Unit = {},
     val demonstrateField: (Int) -> Unit = {},

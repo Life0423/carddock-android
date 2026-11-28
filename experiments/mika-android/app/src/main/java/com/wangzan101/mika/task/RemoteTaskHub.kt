@@ -41,6 +41,8 @@ class RemoteTaskHub(
     private val unsaved = mutableMapOf<String, PendingEnd>()
 
     override val fileAccess: RemoteTaskFiles by lazy { PhoneTaskFiles(context) { receipts.files(it) } }
+    /** 本机界面与远程令牌分开收件。外部令牌在入口已哈希，不能选择本机身份。 */
+    val localTasks: RemoteTasks by lazy { OwnedHub(LOCAL_OWNER) }
     override fun scope(owner: String): RemoteTasks = OwnedHub(owner)
     override fun scopeIndex(owner: String): RemoteRunIndex = OwnedHub(owner)
 
@@ -106,7 +108,7 @@ class RemoteTaskHub(
         receipts.find(id, goal, conversation, fileRequest, owner)?.let { return current(it) }
         val task = RemoteTask(id, target ?: RemoteTaskService.newConversation(), goal, clock(), null, owner = owner)
         receipts.insert(task, newChat = conversation == null, fileRequest = fileRequest)
-        try { TaskService.startMcp(context, goal, task.conversation, id, attendance) }
+        try { TaskService.startReceipted(context, goal, task.conversation, id, attendance, local = owner == LOCAL_OWNER) }
         catch (e: Exception) {
             receipts.finish(id, TaskState.Failed("Mika could not start the task on the phone.", FailKind.Environment), emptyList())
             throw e
@@ -146,7 +148,9 @@ class RemoteTaskHub(
 
     override fun cancel(id: String): Boolean {
         val task = get(id) ?: return false
-        if (task.state is TaskState.Terminal || live(id) == null) return false
+        if (task.state is TaskState.Terminal) return false
+        // 已入队但尚未被服务领取时直接写取消回执；稍后到达的启动 Intent 无法再次领取。
+        if (live(id) == null && receipts.finish(id, TaskState.Cancelled, emptyList(), onlyUnclaimed = true)) return true
         TaskService.cancelMcp(context, id)
         return true
     }
@@ -220,6 +224,7 @@ class RemoteTaskHub(
     }
 
     private companion object {
+        const val LOCAL_OWNER = "carddock-local-ui"
         const val TAG = "MikaMcp"
         const val LOST_MS = 2 * 60_000L
     }

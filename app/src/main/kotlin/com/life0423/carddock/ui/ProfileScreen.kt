@@ -81,15 +81,30 @@ internal fun ProfileScreen(
                     modifier = Modifier.testTag("accessibility_settings"), statusConnected = pageReaderConnected,
                     onClick = openAccessibilitySettings)
                 HorizontalDivider(color = DockColors.Outline)
-                ProfileRow("手机运行环境", Icons.Rounded.Build, if (mikaConnected) "助手已连接" else "查看状态",
+                val embedded = (context.applicationContext as? com.wangzan101.mika.cap.phone.PhoneServices.Owner)?.phone
+                if (embedded != null) {
+                    val state by embedded.shellControl.status.collectAsState()
+                    val summary = if (state == com.wangzan101.mika.core.shell.BuiltinShellStatus.Connecting)
+                        "正在连接手机助手" else com.wangzan101.mika.ui.PhoneSetupCopy.statusValue(state).first
+                    ProfileRow("手机助手", Icons.Rounded.Build, summary,
+                        statusConnected = state == com.wangzan101.mika.core.shell.BuiltinShellStatus.Running) {
+                        context.startActivity(android.content.Intent(context, com.life0423.carddock.phone.PhoneSetupActivity::class.java)
+                            .putExtra("embeddedAssistant", true))
+                    }
+                    HorizontalDivider(color = DockColors.Outline)
+                }
+                ProfileRow("旧卡页面核验助手", Icons.Rounded.Build, if (mikaConnected) "助手已连接" else "查看状态",
                     statusConnected = mikaConnected) {
                     context.startActivity(android.content.Intent(context, com.life0423.carddock.phone.PhoneSetupActivity::class.java))
                 }
                 if (tools != null) {
                     HorizontalDivider(color = DockColors.Outline)
+                    val mikaRoles = (context.applicationContext as? com.wangzan101.mika.settings.ProviderStore.Owner)
+                        ?.providers?.roles?.collectAsState()?.value
+                    val configured = tools.model != null || mikaRoles?.main != null || mikaRoles?.resolve(com.wangzan101.mika.core.model.ModelRole.Vision) != null
                     ProfileRow("模型配置", DockIcons.AutoAwesomeMosaic,
-                        if (tools.model != null) "已配置" else if (tools.modelBusy) "读取中" else "未配置",
-                        statusConnected = tools.model != null) { dialog = "模型配置" }
+                        if (configured) "已配置" else if (tools.modelBusy) "读取中" else "未配置",
+                        statusConnected = configured) { dialog = "模型配置" }
                 }
             }
         }

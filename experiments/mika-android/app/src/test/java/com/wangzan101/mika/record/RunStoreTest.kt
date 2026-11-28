@@ -60,6 +60,39 @@ class RunStoreTest {
         assertEquals(log, events.readText())
     }
 
+    @Test fun identityPageKeepsItsStatusWithoutSavingCodeOrFrame() {
+        val s = store()
+        val handle = s.open("打开淘宝身份码")
+        handle.event(RunEvent.TaskEnded(2, "succeeded", "已到身份码页面 A4-013-829"))
+        handle.media(1, byteArrayOf(1, 2, 3))
+        handle.close()
+        val result = s.events(handle.runId).filterIsInstance<RunEvent.TaskEnded>().single().toString()
+        assertTrue("身份码页面" in result)
+        assertFalse("013" in result)
+        assertNull(s.screen(handle.runId, 1))
+    }
+
+    @Test fun pickupDiagnosticsKeepNavigationButDoNotPersistCodesOrFrames() {
+        val s = store()
+        val handle = s.open("在应用查看取件码")
+        val code = "A3-12-9097"
+        handle.event(RunEvent.ToolResult(1L, 1, "phone_observe",
+            """{"currentApp":"test.pickup","elements":[{"role":"Text","name":"取件码"},{"name":"$code"}]}""", false, null))
+        handle.media(1, byteArrayOf(1, 2, 3))
+        val routeId = "route-4830"
+        handle.event(RunEvent.Replay(2, routeId, 1, 1, true, "第1步已核对"))
+        handle.event(RunEvent.TaskEnded(2, "succeeded", "取件码为 $code"))
+        handle.close()
+        s.append(handle.runId, RunEvent.OutcomeJudged(3, "done", code))
+        val dir = tmp.root.resolve("files/runs/${handle.runId}")
+        assertTrue(dir.listFiles()!!.filter { it.isFile }.none { it.readText().contains(code) })
+        assertNull(s.screen(handle.runId, 1))
+        assertEquals(routeId, s.events(handle.runId).filterIsInstance<RunEvent.Replay>().single().routeId)
+        val result = s.events(handle.runId).filterIsInstance<RunEvent.ToolResult>().single()
+        assertTrue("test.pickup" in result.resultJson)
+        assertTrue("取件码" in result.resultJson)
+    }
+
     @Test fun usageLogMarksADamagedLineAndPreservesMissingCounters() {
         val s = store()
         val id = s.open("g").also { it.close() }.runId
@@ -207,13 +240,15 @@ class RunStoreTest {
     }
 
     @Test fun runJsonRefreshedBeforeClose() {
-        val s = store()
-        val h = s.open("g")
-        for (step in 1..RunHandle.SUMMARY_EVERY) h.event(RunEvent.ModelReply(clock, step, "", "phone_observe", "{}", 10, 1, null))
-        val deadline = System.currentTimeMillis() + 5_000
-        while (s.list().single().steps < RunHandle.SUMMARY_EVERY && System.currentTimeMillis() < deadline) Thread.sleep(10)
-        assertEquals(RunHandle.SUMMARY_EVERY, s.list().single().steps)
-        h.close()
+        val frameStarted = CountDownLatch(1)
+        val s = store(encode = { png -> frameStarted.countDown(); png })
+        s.open("g").use { h ->
+            for (step in 1..RunHandle.SUMMARY_EVERY) h.event(RunEvent.ModelReply(clock, step, "", "phone_observe", "{}", 10, 1, null))
+            // 同一写线程处理完前面的事件才编码这张图；此时读取不会妨碍 Windows 原子替换摘要。
+            h.media(1, byteArrayOf(1))
+            assertTrue("writer did not reach the frame", frameStarted.await(5, TimeUnit.SECONDS))
+            assertEquals(RunHandle.SUMMARY_EVERY, s.list().single().steps)
+        }
     }
 
     @Test fun externalMirrorKeepsOnlyLatest() {

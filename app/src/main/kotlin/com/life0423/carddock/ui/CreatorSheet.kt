@@ -77,11 +77,11 @@ internal fun CreatorScreen(
     chooseAnother: (() -> Unit)? = null,
     listCode: com.life0423.carddock.core.model.PickupEntry? = null,
 ) = DockActionTheme {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var pickingApp by rememberSaveable { mutableStateOf(false) }
     if (pickingApp) AppPicker({ pickingApp = false }, onTask = { demand ->
         pickingApp = false
-        actions.changePrompt(demand)
-        actions.prepareTemplate()
+        context.openFreeTask(demand)
     }) { app ->
         pickingApp = false
         actions.chooseDraftTemplate(app.template(draft.prompt.ifBlank { "打开${app.label}" }))
@@ -166,8 +166,12 @@ internal fun CreatorScreen(
                         modifier = Modifier.fillMaxWidth().testTag("creator_prompt").semantics { contentDescription = "你想让卡片做什么？" },
                     )
                 }
-                if (editingTemplate && draft.template == null) CapabilityBrowser(busy, templates,
-                    choose = actions.chooseDraftTemplate, fill = actions.changePrompt, pickApp = { pickingApp = true })
+                if (editingTemplate && draft.template == null) {
+                    var browseRules by rememberSaveable(draft.personalTemplateId) { mutableStateOf(false) }
+                    TextButton({ browseRules = !browseRules }, enabled = !busy) { Text(if (browseRules) "收起已有规则" else "选择已有规则") }
+                    if (browseRules) CapabilityBrowser(busy, templates, choose = actions.chooseDraftTemplate,
+                        fill = actions.changePrompt, pickApp = { pickingApp = true })
+                }
                 if (draft.message.startsWith("应用识别失败") || draft.message.startsWith("请写出要打开的应用名")) {
                     TextButton({ pickingApp = true }) { Text("从本机应用中选择") }
                 }
@@ -401,11 +405,11 @@ internal fun CreatorScreen(
                 if (!showFace && editingTemplate) TextButton(onClick = actions.keepTemplateDraft,
                     enabled = !busy && (draft.title.isNotBlank() || draft.prompt.isNotBlank()),
                     modifier = Modifier.testTag("save_template_edit")) { Text("保存草稿") }
-                if (!showFace && editingTemplate && draft.template == null && draft.plans.isEmpty()) Button(
-                    onClick = { focusManager.clearFocus(); actions.prepareTemplate() },
-                    enabled = draft.prompt.isNotBlank() && !busy,
-                    shape = DockButtonShape, modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("prepare_template"),
-                ) { Text(if (busy) "正在核对需求…" else "理解需求") }
+                if (!showFace && editingTemplate && draft.template == null) Button(
+                    onClick = { focusManager.clearFocus(); context.startRouteTrial(draft.prompt) },
+                    enabled = draft.prompt.trim().length in 1..com.wangzan101.mika.core.remote.RemoteTaskService.MAX_GOAL && !busy,
+                    shape = DockButtonShape, modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("free_template"),
+                ) { Text("让 Mika 试查") }
                 if (showFace && !exploring) Button(
                     onClick = {
                         focusManager.clearFocus()

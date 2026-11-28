@@ -1,5 +1,7 @@
 package com.life0423.carddock.ui
 
+import android.content.Intent
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -42,10 +44,13 @@ import com.life0423.carddock.ui.theme.DockColors
 /** 密钥输入仅存在于当前表单，配置摘要只显示地址和模型。 */
 @Composable
 internal fun ModelSettingsForm(tools: PrototypeTools, save: (String, String, String) -> Unit, clear: () -> Unit) {
+    val context = LocalContext.current
     var endpoint by remember(tools.model) { mutableStateOf(tools.model?.endpoint.orEmpty()) }
     var model by remember(tools.model) { mutableStateOf(tools.model?.model.orEmpty()) }
     var key by remember { mutableStateOf("") }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton({ context.startActivity(Intent(context, VisionSettingsActivity::class.java)) },
+            modifier = Modifier.fillMaxWidth()) { Text("看图模型") }
         if (tools.model != null) Text("已配置 · " + tools.model.model)
         OutlinedTextField(endpoint, { endpoint = it }, Modifier.fillMaxWidth(), label = { Text("HTTPS 基础地址（含 /v1 等路径）") },
             singleLine = true, enabled = !tools.modelBusy, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))

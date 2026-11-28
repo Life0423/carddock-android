@@ -44,6 +44,7 @@ internal fun CardDockApp(
     saveShopping: (String) -> Unit = {},
     pageReaderConnected: Boolean = false,
     mikaConnected: Boolean = false,
+    routeSpaceRequest: Int = 0, routeDrafts: Boolean = false,
     saveMeituanRoute: (String, String?) -> Boolean = { _, _ -> false },
     toggleShoppingFavorite: () -> Unit = {},
 ) {
@@ -56,8 +57,6 @@ internal fun CardDockApp(
         var spaceMenu by remember { mutableStateOf(false) }
         var shopping by rememberSaveable { mutableStateOf(false) }
         var pickingTemplate by rememberSaveable { mutableStateOf(false) }
-        var editorFromPicker by rememberSaveable { mutableStateOf(false) }
-        var newTemplateId by rememberSaveable { mutableStateOf<String?>(null) }
         var returnToSpaceAfterSave by rememberSaveable { mutableStateOf(false) }
         var detailId by rememberSaveable { mutableStateOf<String?>(null) }
         val shoppingState = rememberSaveableStateHolder()
@@ -84,12 +83,19 @@ internal fun CardDockApp(
                 detailId = null
             }
         }
-        LaunchedEffect(state.draft, editorFromPicker) {
-            if (state.draft == null && editorFromPicker) {
-                editorFromPicker = false
-                pickingTemplate = true
+        val context = androidx.compose.ui.platform.LocalContext.current
+        var showDrafts by rememberSaveable { mutableStateOf(false) }
+        // 草稿和实例各回所属分页。
+        LaunchedEffect(routeSpaceRequest) {
+            if (routeSpaceRequest > 0) {
+                tab = if (routeDrafts) "templates" else "space"
+                showDrafts = routeDrafts
+                shopping = false
+                detailId = null
+                pickingTemplate = false
             }
         }
+        fun newRoute() = context.openRoutes()
         BackHandler(state.draft == null && tab == "space" && (detail != null || shopping)) {
             if (detail != null) detailId = null else shopping = false
         }
@@ -128,10 +134,15 @@ internal fun CardDockApp(
                     )
                     if (tab == "space" && detail == null && !shopping) {
                         val ids = state.cards.filterNot { it.rule.sourceId.startsWith("demo.") }.map { it.id }
-                        if (ids.isNotEmpty() && state.sequence == null) Box {
+                        if ((ids.isNotEmpty() || shoppingAvailable) && state.sequence == null) Box {
                             IconButton(onClick = { spaceMenu = true }) { Icon(DockIcons.MoreHoriz, "空间操作") }
                             DropdownMenu(spaceMenu, { spaceMenu = false }) {
-                                DropdownMenuItem(text = { Text("顺序核验") }, onClick = {
+                                if (shoppingAvailable) DropdownMenuItem(text = { Text("显示器选购") }, onClick = {
+                                    spaceMenu = false
+                                    marketTab = 0
+                                    shopping = true
+                                })
+                                if (ids.isNotEmpty()) DropdownMenuItem(text = { Text("顺序核验") }, onClick = {
                                     spaceMenu = false
                                     actions.refreshSequence(ids)
                                 })
@@ -144,7 +155,7 @@ internal fun CardDockApp(
                             modifier = Modifier.testTag("open_creator"),
                         ) { Icon(Icons.Rounded.Add, "添加功能卡") }
                     } else if (tab == "templates") {
-                        FilledTonalButton({ actions.openTemplateEditor(null) }, Modifier.testTag("new_template"),
+                        FilledTonalButton({ newRoute() }, Modifier.testTag("new_template"),
                             enabled = state.sequence == null && !state.loading,
                             colors = ButtonDefaults.filledTonalButtonColors(containerColor = DockColors.Mint,
                                 contentColor = MaterialTheme.colorScheme.onPrimary)) {
@@ -175,9 +186,8 @@ internal fun CardDockApp(
                     state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     tab == "templates" -> TemplatesScreen(
                         state.personalTemplates, square, enabled = state.sequence == null,
-                        onDownload = { if (square.signedIn) squareStore?.download(it) else requestAccount() },
-                        onUnfavorite = { squareStore?.toggleFavorite(it) },
-                        onUse = actions.openCreator, onEdit = actions.openTemplateEditor, onDelete = actions.deleteTemplate,
+                        showDrafts = showDrafts, onSection = { showDrafts = it },
+                        onUse = actions.openCreator, onEdit = actions.openTemplateEditor, onDelete = actions.deleteTemplate, onDiscard = actions.discardTemplateDraft,
                     )
                     tab == "square" -> SquareScreen(squareStore, square, state.personalTemplates, requestAccount, publishPicker) { publishPicker = false }
                     tab == "profile" -> ProfileScreen(
@@ -209,7 +219,7 @@ internal fun CardDockApp(
                         onToggleShoppingFavorite = toggleShoppingFavorite,
                         onAdd = { pickingTemplate = true },
                         onOpenRank = { marketTab = 0; shopping = true },
-                        onOpenShopping = if (shoppingAvailable) ({
+                        onOpenShopping = if (shoppingAvailable && (pair.isNotEmpty() || tools?.shopping != null)) ({
                             shopping = true
                             marketTab = if (pair.size == 2 || tools?.shopping != null) 1 else 0
                             if (pair.size == 2) actions.refreshSequence(pair)
@@ -238,21 +248,19 @@ internal fun CardDockApp(
                     },
                     saveDraft = {
                         returnToSpaceAfterSave = draft.personalTemplateId == null && draft.ruleChangeCard == null
-                        if (editorFromPicker) newTemplateId = draft.personalTemplateId
                         actions.saveDraft()
                     },
                 ),
             )
         } else if (pickingTemplate) {
             CardTemplatePicker(
-                state.personalTemplates.mapNotNull { it.published }.sortedBy { it.id != newTemplateId },
+                state.personalTemplates.mapNotNull { it.published },
                 square.installed.map { it.definition() },
-                onDismiss = { pickingTemplate = false; newTemplateId = null },
-                onUse = { pickingTemplate = false; newTemplateId = null; actions.openCreator(it) },
+                onDismiss = { pickingTemplate = false },
+                onUse = { pickingTemplate = false; actions.openCreator(it) },
                 onCreate = {
                     pickingTemplate = false
-                    editorFromPicker = true
-                    actions.openTemplateEditor(null)
+                    newRoute()
                 },
             )
         }

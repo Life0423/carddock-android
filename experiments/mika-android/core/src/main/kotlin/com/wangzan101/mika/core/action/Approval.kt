@@ -33,6 +33,10 @@ fun interface ApprovalSettings {
     /** 自主模式:连付款也不先问。 */
     fun autonomous(): Boolean
 
+    /** 宿主单独处理购物车、下单和结算时，由宿主提供确认入口。 */
+    val manualShopping: Boolean get() = false
+    val browseRoute: Boolean get() = false
+
     companion object {
         /** 询问(默认):付款和工具声明要问的那几步(见 [Risk.ask])先问。 */
         val ASK = ApprovalSettings { false }

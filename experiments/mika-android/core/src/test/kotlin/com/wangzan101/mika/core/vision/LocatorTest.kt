@@ -151,6 +151,66 @@ class LocatorTest {
         found(locator(LocScreen(), says("""{"bbox_2d":[0,100,1000,161],"seen":"WLAN 已连接"}""", "是")).locate("WLAN", "WLAN"))
     }
 
+    @Test fun iconAppearanceNeedsMatchingTreeAndIndependentCropConfirmation() = runTest {
+        val button = uiEl("@e4", "筛选", listOf(0, 100, 999, 160))
+        val old = """{"bbox_2d":[0,100,1000,161],"seen":"黑色漏斗形图标"}"""
+        val typed = """{"bbox_2d":[0,100,1000,161],"seen":"倒三角形和短柄","visible_text":""}"""
+        val target = "用图形辨认右侧漏斗入口"
+        for (box in listOf(old, typed)) {
+            val m = says(box, "yes")
+            assertEquals("vision", found(locator(LocScreen(listOf(button)), m).locate(target, "筛选", true)).source)
+            assertEquals(2, m.requests[1].single().parts.filterIsInstance<Part.Image>().size)
+            assertEquals("not_confirmed", notFound(locator(LocScreen(listOf(button)), says(box, "否")).locate(target, "筛选", true)).reason)
+            assertEquals("name_mismatch", notFound(locator(LocScreen(listOf(button.copy(name = "删除"))), says(box)).locate(target, "筛选", true)).reason)
+            assertTrue(locator(LocScreen(), says(box, "yes")).locate(target, "筛选", true) is LocateResult.NotFound)
+        }
+        assertTrue(locator(LocScreen(), says(old.replace("黑色漏斗形图标", "筛选漏斗图标"), "yes")).locate(target, "筛选", true) is LocateResult.NotFound)
+        for (box in listOf(old.replace("黑色漏斗形图标", "筛选图标旁写着删除"), old.replace("黑色漏斗形图标", "删除"),
+            typed.replace("\"visible_text\":\"\"", "\"visible_text\":\"删除\""))) {
+            assertEquals("name_mismatch", notFound(locator(LocScreen(listOf(button)), says(box)).locate(target, "筛选", true)).reason)
+        }
+    }
+
+    @Test fun secondLookChecksTranscribedWordsSeparatelyFromAppearance() = runTest {
+        val box = """{"bbox_2d":[0,100,1000,161],"seen":"无线信号图案","visible_text":"WLAN"}"""
+        val model = unverified(box, "是", box, "是")
+        found(locator(adequate(), model).locate("WLAN", "WLAN"))
+        val mismatch = unverified(box, "是", box.replace("\"WLAN\"", "\"蓝牙\""), "是")
+        assertEquals("unverified_grounding", notFound(locator(adequate(), mismatch).locate("WLAN", "WLAN")).reason)
+    }
+
+    @Test fun firstVisionRequestLocatesTheGlyphInAnEnlargedCurrentControl() = runTest {
+        val other = uiEl("@e1", "东东", listOf(0, 100, 300, 300))
+        val filter = uiEl("@e2", "筛选", listOf(600, 100, 900, 300))
+        val nested = filter.copy(ref = "@e3", clickable = false, bounds = listOf(610, 110, 890, 290))
+        val seen = listOf(other, filter, nested)
+        val wrong = """{"bbox_2d":[0,100,300,300],"seen":"筛选"}"""
+        val local = """{"bbox_2d":[200,250,600,750],"seen":"a filter icon shaped like a funnel"}"""
+        val model = says(local, "是")
+        val result = found(locator(LocScreen(seen), model).locate("右侧漏斗形按钮", "筛选", true))
+        assertEquals("vision", result.source)
+        assertTrue(result.note.orEmpty().contains("current control crop"))
+        assertArrayEquals(intArrayOf(656,151,777,251), result.box)
+        fun sizes(turn: Int) = model.requests[turn].single().parts.filterIsInstance<Part.Image>().map {
+            JvmTestImageOps.size(Base64.getDecoder().decode(it.pngBase64))
+        }
+        assertEquals(listOf(100 to 200, 290 to 384), sizes(0))
+        assertEquals(listOf(100 to 200, 238 to 384), sizes(1))
+        for ((tree, answers) in listOf(
+            seen to arrayOf("null"),
+            seen to arrayOf(local, "否"),
+            seen to arrayOf(local.replace("}", ""","visible_text":"删除"}""")),
+            seen to arrayOf(local.replace("a filter icon shaped like a funnel", "icon labelled Delete")),
+            seen + filter.copy(ref = "@e4", bounds = listOf(310, 100, 510, 300)) to arrayOf(wrong),
+            listOf(other) to arrayOf(wrong.replace("筛选", "删除")),
+            seen + filter.copy(ref = "@e5", name = "删除", bounds = listOf(685, 170, 750, 230)) to arrayOf(local)
+        )) {
+            val negative = says(*answers)
+            assertTrue(locator(LocScreen(tree), negative).locate("右侧漏斗形按钮", "筛选", true) is LocateResult.NotFound)
+            assertEquals(answers.size, negative.requests.size)
+        }
+    }
+
     @Test fun nameMismatchOnElementAtCenter() = runTest {
         val bt = uiEl("@e1", "蓝牙", listOf(0, 100, 999, 160))
         val r = notFound(locator(LocScreen(listOf(bt)), says("""{"bbox_2d":[0,100,1000,161],"seen":"WLAN"}""")).locate("WLAN", "WLAN"))

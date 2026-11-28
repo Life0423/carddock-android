@@ -150,6 +150,9 @@ internal class Interfaces(
         if (tool.offScreen || tool.verb == Verb.ListApps) return body(false)
         // 按目标启动可离开受限应用;此时不采集旧页面,只在启动后附上允许的页面。
         if (tool.verb in APP_TARGET_VERBS) {
+            // 按包名启动不需要来源页，但仍是完整的一步；不能沿用上一次点击的目标。
+            gateView.capture = if (captureTargets && tool.routable)
+                GateView.Capture(null, Anchors(null, emptyList()), null) else null
             val raw = body(false)
             return finish(tool, args, Prep(session, null, null), raw, inlineScreen)
         }

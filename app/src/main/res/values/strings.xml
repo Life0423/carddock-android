@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">卡坞 · 原型</string>
+    <string name="adb_key_wrap_alias" translatable="false">carddock_phone_key</string>
+    <string name="adb_connection_prefs" translatable="false">phone_link</string>
+    <string name="mika_task_accessibility">卡坞 · Mika 自由操作</string>
 </resources>

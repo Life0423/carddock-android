@@ -2,7 +2,7 @@
 
 `mika-android/` 是独立的 Android Gradle 工程，基于 [Mika v0.1.38](https://github.com/wangzan101/Mika/releases/tag/v0.1.38)（`5d3c7f9c0ce521812632674776b780a1b4bbf58a`）。CardDock 根目录仍是模拟设备原型。打开 Android Studio 时选择要运行的工程目录。
 
-本目录作为迁移参考保留，不作为团队产品主线。新业务优先修改根目录 `app/core`；本工程的 UI、Room 数据库与动作规则不直接替换主工程。CardDock 入口位于 `app/src/debug`，release 不包含这些入口。上游 README 中的下载和反馈链接属于 Mika，不是 CardDock 的发布渠道。
+从卡坞 beta.22 起，根工程通过组合构建引用本目录的 `:embedded` 和 `:core`。独立 Mika 应用与早期 debug 实验仍在本目录内。新业务优先修改根目录 `app/core`；本工程的 UI、Room 数据库与动作规则不直接替换主工程。CardDock 入口位于 `app/src/debug`，release 不包含这些入口。上游 README 中的下载和反馈链接属于 Mika，不是 CardDock 的发布渠道。
 
 ## 当前功能
 
@@ -55,4 +55,4 @@ adb shell cat /sdcard/Android/data/com.wangzan101.mika.dev/files/page-probe/stat
 
 ## 源码来源
 
-工程保留上游许可证、NOTICE、第三方声明及沙箱构建脚本。此源码快照省去了上游预编译 Linux 沙箱运行环境和原生沙箱程序。卡片和采样使用 Android 无障碍服务。Linux 沙箱功能需按[上游沙箱构建说明](mika-android/tools/sandbox/README.md)自行准备运行文件。
+工程保留上游许可证、NOTICE、第三方声明及沙箱构建脚本。独立实验应用的源码目录省去了上游预编译沙箱运行文件。单 APK 模块 `embedded/src/main` 随包提供已核对的 v0.1.38 运行环境和 arm64 原生程序。卡片和采样使用 Android 无障碍服务。Linux 沙箱功能需按[上游沙箱构建说明](mika-android/tools/sandbox/README.md)自行准备运行文件。

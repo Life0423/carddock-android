@@ -11,6 +11,7 @@ import com.wangzan101.mika.core.tool.ToolContext
 import com.wangzan101.mika.core.tool.ToolDef
 import com.wangzan101.mika.core.tool.ToolExecution
 import com.wangzan101.mika.core.tool.Verb
+import com.wangzan101.mika.core.tool.bool
 import com.wangzan101.mika.core.tool.fail
 import com.wangzan101.mika.core.tool.failCode
 import com.wangzan101.mika.core.tool.ok
@@ -76,6 +77,7 @@ internal class FindVisually(f: ScreenFamily) : ScreenTool(f, "find_visually") {
         mapOf(
             "target" to str("What the element is, e.g. the search icon at the top right. 1-120 characters."),
             "text" to str("The element's exact on-screen label, if it has one. 1-60 characters."),
+            "requirePixels" to bool("Require a screenshot match and visual confirmation of the icon or appearance. The label can corroborate the mark. Default false."),
         ), listOf("target")) }
 
     override fun usable(ctx: ToolContext) = ctx.config.vision != null
@@ -83,7 +85,7 @@ internal class FindVisually(f: ScreenFamily) : ScreenTool(f, "find_visually") {
     override suspend fun execute(a: Args, ctx: ToolContext): ToolExecution {
         val target = a.str("target", max = 120)!!
         val text = a.str("text", max = 60)
-        return when (val r = ctx.locator!!.locate(target, text?.trim())) {
+        return when (val r = ctx.locator!!.locate(target, text?.trim(), a.bool("requirePixels", false))) {
             is LocateResult.NotFound -> ok { put("found", false); put("reason", r.reason); put("message", r.message) }
             is LocateResult.Found -> {
                 ctx.locatedInfo[r.ref] = Located(target, text?.trim(), r.seen, r.unverified)

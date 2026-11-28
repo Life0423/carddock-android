@@ -1,0 +1,19 @@
+<resources>
+    <string name="vision_probe_title">Test vision model</string>
+    <string name="vision_probe_prompt">Send a generated number image to %1$s. The model will be used for vision if it reads the number correctly.</string>
+    <string name="vision_probe_run">Test and use</string>
+    <string name="vision_probe_busy">Reading test image…</string>
+    <string name="vision_probe_ok">Test image read correctly. Vision model enabled.</string>
+    <string name="vision_probe_mismatch">The answer did not match the image. Check the model and try again.</string>
+    <string name="vision_probe_auth">Check this provider’s credentials and try again.</string>
+    <string name="vision_probe_network">Could not connect. Check the network and try again.</string>
+    <string name="vision_probe_quota">The provider limited this request. Check quota and try again.</string>
+    <string name="vision_probe_unavailable">Could not use this model for images. Check the model and provider.</string>
+    <string name="vision_probe_need_main">Choose a main model first.</string>
+    <string name="vision_pin_main">Test and pin current main model</string>
+    <string name="vision_pin_main_note">Vision will keep using this tested model if you change the main model.</string>
+    <string name="vision_declared_yes">Provider lists image support</string>
+    <string name="vision_declared_no">Provider lists no image support</string>
+    <string name="vision_undeclared">Image support unspecified</string>
+    <string name="vision_probe_passed">Passed image test</string>
+</resources>

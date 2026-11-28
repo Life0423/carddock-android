@@ -1,0 +1,19 @@
+<resources>
+    <string name="vision_probe_title">测试看图模型</string>
+    <string name="vision_probe_prompt">向 %1$s 发送本机生成的数字图。正确读出后将启用此看图模型。</string>
+    <string name="vision_probe_run">测试并启用</string>
+    <string name="vision_probe_busy">正在识别测试图…</string>
+    <string name="vision_probe_ok">测试图识别正确，已启用看图模型。</string>
+    <string name="vision_probe_mismatch">模型读出的数字与测试图不符，请核对所选模型。</string>
+    <string name="vision_probe_auth">服务商鉴权失败，请检查登录状态或密钥。</string>
+    <string name="vision_probe_network">连接失败，请检查网络后重试。</string>
+    <string name="vision_probe_quota">服务商限制了请求，请检查额度或稍后重试。</string>
+    <string name="vision_probe_unavailable">无法使用此模型看图，请核对模型名称、图片支持和服务商配置。</string>
+    <string name="vision_probe_need_main">请先选择主模型。</string>
+    <string name="vision_pin_main">测试并固定当前主模型</string>
+    <string name="vision_pin_main_note">以后更换主模型时，看图仍使用这次验证的模型。</string>
+    <string name="vision_declared_yes">服务商声明支持看图</string>
+    <string name="vision_declared_no">服务商声明不支持看图</string>
+    <string name="vision_undeclared">服务商未说明看图能力</string>
+    <string name="vision_probe_passed">已通过识图测试</string>
+</resources>

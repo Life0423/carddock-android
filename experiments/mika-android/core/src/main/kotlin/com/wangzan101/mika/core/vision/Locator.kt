@@ -9,6 +9,8 @@ import com.wangzan101.mika.core.uistate.ScreenSnapshot
 import com.wangzan101.mika.core.uistate.TreeAdequacy
 import com.wangzan101.mika.core.uistate.TreeQuality
 import com.wangzan101.mika.core.uistate.UiElement
+import com.wangzan101.mika.core.uistate.normalize
+import com.wangzan101.mika.core.uistate.toPx
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
@@ -62,6 +64,9 @@ private val BBOX_2D = Regex("\"?bbox_2d\"?\\s*:\\s*\\[\\s*(\\d+(?:\\.\\d+)?)\\s*
 private val BARE_BOX = Regex("^\\[\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(\\d+(?:\\.\\d+)?)\\s*]$")
 private val FOUR_NUMBERS = Regex("\\[\\s*\\d+(?:\\.\\d+)?\\s*,\\s*\\d+(?:\\.\\d+)?\\s*,\\s*\\d+(?:\\.\\d+)?\\s*,\\s*\\d+(?:\\.\\d+)?\\s*]")
 private val SEEN = Regex("\"seen\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
+private val VISIBLE_TEXT = Regex("\"visible_text\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
+private val PRINTED_DESCRIPTION = Regex("""写着|写有|印着|字样|文字|标注|标有|[「『“"]|\b(?:reads|says|labelled|labeled|text|words?|caption|printed)\b""", RegexOption.IGNORE_CASE)
+private val LEGACY_ICON = Regex("""^[\p{L}\s-]+图标$|\bicon\b""", RegexOption.IGNORE_CASE)
 private val YES = Regex("^(是|yes(?![A-Za-z0-9_]))", RegexOption.IGNORE_CASE)
 private const val MAX_SEEN = 120
 
@@ -78,15 +83,15 @@ private val DESCRIBE_PROMPT: String by lazy { Prompts.role("describe") }
  */
 class Locator(private val screen: ScreenPort, private val vision: VisionService, private val registry: LocateRegistry, family: ScreenFamily) {
     private val m = LocateMessages(family)
-    private class Box(val l: Int, val t: Int, val r: Int, val b: Int, val seen: String?)
+    private data class Box(val l: Int, val t: Int, val r: Int, val b: Int, val seen: String?, val visibleText: String?)
 
-    suspend fun locate(target: String, text: String?): LocateResult {
+    suspend fun locate(target: String, text: String?, requirePixels: Boolean = false): LocateResult {
         val first = capture().let { it as? Shot.Ok ?: return (it as Shot.Missing).asNotFound() }
         val elements = if (text != null) readElements() else null
         val second = capture().let { it as? Shot.Ok ?: return (it as Shot.Missing).asNotFound() }
         val synced = elements != null && hamming(first.hash, second.hash) <= LOCATE_SCREEN_CHANGE
 
-        if (text != null && synced) {
+        if (!requirePixels && text != null && synced) {
             val hit = exactMatch(elements!!, text)
             if (hit != null) {
                 val b = hit.bounds
@@ -96,27 +101,64 @@ class Locator(private val screen: ScreenPort, private val vision: VisionService,
             }
         }
 
-        clearForVision()?.let { return it.asNotFound() }
         val (locatePrompt, confirmPrompt) = PROMPTS
+        val query = if (text != null) "$target (label: \"$text\")" else target
+        // 树只提供本帧的候选范围。点击的坐标仍须来自模型框选的图形。
+        val region = if (requirePixels && text != null && synced) {
+            val names = elements.orEmpty().filter { onScreen(it) && norm(it.name) == norm(text) }.sortedBy(::area)
+            val inner = names.firstOrNull()
+            if (inner != null && names.all { nested(inner, it) })
+                names.firstOrNull { it.clickable && area(it) < 999L * 999 / 2 }?.bounds else null
+        } else null
+        clearForVision()?.let { return it.asNotFound() }
         val box = try {
-            parseBox(vision.ask(locatePrompt, if (text != null) "$target (label: \"$text\")" else target, listOf(second.png)))
+            if (region == null) parseBox(vision.ask(locatePrompt, query, listOf(second.png))) else {
+                val context = vision.ops.drawFrame(second.png, region.toIntArray())
+                val crop = enlargedCrop(second.png, region.toIntArray())
+                val instructions = "$locatePrompt\nImage 1 shows the whole page, with the candidate control framed. Image 2 enlarges that area. Mark only the requested glyph in image 2 and report coordinates relative to image 2. Words outside the glyph are position clues. Return null unless you can see the requested shape."
+                parseBox(vision.ask(instructions, query, listOf(context, crop)))?.let { local ->
+                    val (width, height) = vision.ops.size(second.png)
+                    fun project(coord: Int, start: Int, end: Int, size: Int): Int {
+                        val firstPixel = toPx(start, size)
+                        return normalize(firstPixel + toPx(coord, toPx(end, size) - firstPixel + 1), size)
+                    }
+                    local.copy(l = project(local.l, region[0], region[2], width), r = project(local.r, region[0], region[2], width),
+                        t = project(local.t, region[1], region[3], height), b = project(local.b, region[1], region[3], height))
+                        .takeIf { it.r > it.l && it.b > it.t }
+                }
+            }
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
             return LocateResult.NotFound("vision_unavailable", "Locating by sight failed this time. ${m.notFoundNext}")
         } ?: return LocateResult.NotFound("not_found", "The described element was not found on the screen. ${m.notFoundNext}")
 
-        if (text != null && box.seen != null && disagree(box.seen, text)) {
-            return LocateResult.NotFound("name_mismatch", "The closest match reads \"${box.seen.take(40)}\", not \"$text\", so it was not used. ${m.notFoundNext}")
-        }
         val x = mid(box.l, box.r); val y = mid(box.t, box.b)
         val occupant = if (text != null && synced) elementAt(elements!!, x, y) else null
+        val appearance = box.seen
+        val mentionsWords = appearance?.let(PRINTED_DESCRIPTION::containsMatchIn) == true
+        val iconOnly = requirePixels && appearance != null && !mentionsWords &&
+            (box.visibleText == "" || box.visibleText == null && LEGACY_ICON.containsMatchIn(appearance))
+        val printed = box.visibleText?.takeIf { it.isNotEmpty() } ?: appearance
+        if (text != null && !iconOnly && (requirePixels && mentionsWords && box.visibleText.isNullOrEmpty() || printed != null && disagree(printed, text))) {
+            return LocateResult.NotFound("name_mismatch", "The mark reports \"${printed.orEmpty().take(40)}\" different from \"$text\". ${m.notFoundNext}")
+        }
         if (occupant != null && occupant.name.isNotBlank() && disagree(occupant.name, text!!)) {
             return LocateResult.NotFound("name_mismatch", "The spot that looked like it is labelled \"${occupant.name.take(40)}\", not \"$text\", so it was not used. ${m.notFoundNext}")
         }
+        if (text != null && (iconOnly || region != null) && occupant?.name?.let(::norm) != norm(text))
+            return LocateResult.NotFound("name_mismatch", "The mark and its reported appearance \"${printed.orEmpty().take(40)}\" could not be matched to \"$text\". ${m.notFoundNext}")
+
 
         val boxArr = intArrayOf(box.l, box.t, box.r, box.b)
         val confirmed = try {
             val framed = vision.ops.drawFrame(second.png, boxArr)
-            YES.containsMatchIn(vision.ask(confirmPrompt.replace("{target}", target), "Yes or no?", listOf(framed)).trim())
+            // 要核对图形时同时给同一帧的整屏红框和框内原像素；名称命中只为候选区域提供旁证。
+            val images = if (requirePixels) listOf(framed, enlargedCrop(second.png, boxArr)) else listOf(framed)
+            val question = when {
+                iconOnly && text != null -> "Inspect the second image, cropped from the red frame. Does it visibly show the requested icon shape? Answer no if its printed words conflict with \"$text\" or the shape cannot be distinguished. Yes or no?"
+                requirePixels -> "The second image is the marked area cropped from the first. Confirm the requested visual features only if visible in the crop. Yes or no?"
+                else -> "Yes or no?"
+            }
+            YES.containsMatchIn(vision.ask(confirmPrompt.replace("{target}", target), question, images).trim())
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
             return LocateResult.NotFound("vision_unavailable", "Locating by sight failed this time. ${m.notFoundNext}")
         }
@@ -137,7 +179,9 @@ class Locator(private val screen: ScreenPort, private val vision: VisionService,
 
         val (ref, sid) = registry.put(x, y, second.hash)
         if (visionOnly) return LocateResult.Found(ref, sid, x, y, boxArr, box.seen, "vision", m.visionOnly, unverified = true)
-        return LocateResult.Found(ref, sid, x, y, boxArr, box.seen, "vision", m.checkSeen.takeUnless { nameChecked && box.seen != null })
+        val note = if (region != null) "Located by sight inside the enlarged current control crop and confirmed against the full frame."
+            else m.checkSeen.takeUnless { nameChecked && box.seen != null }
+        return LocateResult.Found(ref, sid, x, y, boxArr, box.seen, "vision", note)
     }
 
     /**
@@ -160,10 +204,18 @@ class Locator(private val screen: ScreenPort, private val vision: VisionService,
         val box = parseBox(vision.ask(locatePrompt, if (text != null) "$target (label: \"$text\")" else target, listOf(png))) ?: return false
         val seenA = first.seen ?: return false
         val seenB = box.seen ?: return false
-        if (disagree(seenA, seenB) || (text != null && disagree(seenB, text))) return false
+        val words = box.visibleText ?: seenB
+        if (disagree(seenA, seenB) || text != null && (words.isEmpty() || disagree(words, text))) return false
         if (!contains(first, mid(box.l, box.r), mid(box.t, box.b)) || !contains(box, mid(first.l, first.r), mid(first.t, first.b))) return false
         val framed = vision.ops.drawFrame(png, intArrayOf(box.l, box.t, box.r, box.b))
         return YES.containsMatchIn(vision.ask(confirmPrompt.replace("{target}", target), "Yes or no?", listOf(framed)).trim())
+    }
+
+    private fun enlargedCrop(png: ByteArray, bounds: IntArray): ByteArray {
+        val crop = vision.ops.crop(png, bounds)
+        val (width, height) = vision.ops.size(crop)
+        val longest = maxOf(width, height)
+        return if (longest < 384) vision.ops.scale(crop, 384.0 / longest) else crop
     }
 
     private fun contains(b: Box, x: Int, y: Int) = x in b.l..b.r && y in b.t..b.b
@@ -221,7 +273,7 @@ class Locator(private val screen: ScreenPort, private val vision: VisionService,
         return null
     }
 
-    private suspend fun readElements(): List<UiElement>? = peekOrNull()?.takeIf { !it.protected }?.elements
+    private suspend fun readElements(): List<UiElement>? = peekOrNull()?.takeIf { !it.protected && !it.changedDuringRead && it.hasWindow && it.captureError == null }?.elements
 
     private suspend fun peekOrNull(): ScreenSnapshot? =
         try { screen.peek() } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
@@ -251,7 +303,8 @@ class Locator(private val screen: ScreenPort, private val vision: VisionService,
         if (maxOf(x1, y1, x2, y2) <= 1) return null
         fun scale(v: Double) = (v * 999 / 1000).roundToInt()
         val seen = SEEN.find(t)?.groupValues?.get(1)?.let(::unescape)?.trim()?.take(MAX_SEEN)?.ifEmpty { null }
-        return Box(scale(x1), scale(y1), scale(x2), scale(y2), seen)
+        val printed = VISIBLE_TEXT.find(t)?.groupValues?.get(1)?.let(::unescape)?.trim()?.take(MAX_SEEN)
+        return Box(scale(x1), scale(y1), scale(x2), scale(y2), seen, printed)
     }
 
     private fun unescape(raw: String): String =

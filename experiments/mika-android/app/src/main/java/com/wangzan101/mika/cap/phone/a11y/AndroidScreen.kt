@@ -130,6 +130,8 @@ class AndroidScreen(
      */
     private val awaitApp: suspend (packageName: String, user: Int?, timeoutMs: Long, free: suspend () -> Boolean) -> AppWait =
         { _, _, _, _ -> AppWait.Unsupported },
+    /** 允许通用任务认领跨屏打开的应用。后台卡片只在自己的显示屏上浏览。 */
+    private val watchMainScreenOpens: Boolean = true,
 ) : ScreenPort {
     /** 屏还没建时为 -1;只在确认屏已建好之后用。 */
     private val displayId get() = display.current?.displayId ?: -1
@@ -500,7 +502,11 @@ class AndroidScreen(
 
     override suspend fun back(): ActionResult = withContext(Dispatchers.IO) {
         if (!hasDisplay) return@withContext NO_APP_OPEN
-        verified { shell.injectKey(displayId, KeyEvent.KEYCODE_BACK) }
+        verified {
+            // 只读卡片的返回键无控件编号；真正注入前再次核实任务屏前台，避免按到刚切入的其他应用。
+            (watchMainScreenOpens || targetPackage?.let { it == ScreenReader.topPackage(windows()) } == true) &&
+                shell.injectKey(displayId, KeyEvent.KEYCODE_BACK)
+        }
     }
 
     override suspend fun pressKey(keyCode: Int): ActionResult = withContext(Dispatchers.IO) {
@@ -1527,7 +1533,7 @@ class AndroidScreen(
 
     /** 动作之前:请内置助手盯着主屏,记下此刻两块屏最上面的任务;没有屏、接管中或助手不支持时为 null(不盯)。 */
     private fun armSpillWatch(): Watch? {
-        if (!hasDisplay || handedOver()) return null
+        if (!watchMainScreenOpens || !hasDisplay || handedOver()) return null
         val since = SystemClock.uptimeMillis()
         watchUserTaps(since + SPILL_WINDOW_MS)
         val top = runCatching { shell.watchMainScreen(SPILL_WINDOW_MS.toInt()) }.getOrNull() ?: return null

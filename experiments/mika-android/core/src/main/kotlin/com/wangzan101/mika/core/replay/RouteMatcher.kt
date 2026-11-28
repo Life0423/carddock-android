@@ -18,13 +18,13 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 
 /** 选中的路线和本次原话里的槽值(按 `{1}`、`{2}` 的顺序)。 */
-data class RouteChoice(val route: Route, val slots: List<String>)
+data class RouteChoice(val route: Route, val slots: List<String>, val confirmedScope: String = route.template)
 
 /**
  * 任务开始时找一条以往成功的路线:先按 App 与字面相似度取候选,再用一次模型调用(没有候选就不调)选定并抽出槽值。
  * 代码再核一遍:槽值个数要对,且每个都是本次原话里逐字出现的一段。[store] 也供循环更新路线计数。
  */
-class RouteMatcher(private val model: ChatModel, val store: RouteStore, private val knowledge: KnowledgeStore?) {
+class RouteMatcher(private val model: ChatModel, val store: RouteStore, private val knowledge: KnowledgeStore?, val pinned: RouteChoice? = null) {
 
     fun candidates(goal: String, limit: Int = 5): List<Route> {
         val apps = knowledge?.matchTask(goal, Int.MAX_VALUE)?.flatMap { it.packages }?.toSet().orEmpty()
@@ -38,6 +38,7 @@ class RouteMatcher(private val model: ChatModel, val store: RouteStore, private 
     }
 
     suspend fun choose(goal: String): RouteChoice? {
+        pinned?.let { return it }
         val list = candidates(goal)
         if (list.isEmpty()) return null
         val text = list.withIndex().joinToString("\n", "用户原话:$goal\n\n做法模板:\n") { (i, r) -> "${i + 1}. ${r.template}" }

@@ -65,6 +65,26 @@ class ProviderStoreTest {
 
     // ---------- 用途的选择 ----------
 
+    /** 读对图片的 A 必须在重启、更换主模型 B 后仍是看图用途；服务商未声明与实测通过并存。 */
+    @Test fun verifiedVisionPinsCurrentMainAcrossMainChangesAndReload() {
+        val s = store()
+        val p = connected(s)
+        s.use(ModelRole.Main, p.id, "A", none)
+        val a = s.configFor(ModelRole.Main)!!
+        assertTrue(s.activateVerifiedVision(a, ListedModel("A")))
+        s.use(ModelRole.Main, p.id, "B", none)
+        val reloaded = store()
+        assertEquals("B", reloaded.configFor(ModelRole.Main)?.model)
+        assertEquals("B", reloaded.configFor(ModelRole.Light)?.model)
+        assertEquals("A", reloaded.configFor(ModelRole.Vision)?.model)
+        assertFalse(reloaded.configFor(ModelRole.Vision)!!.capabilities.groundingVerified)
+        val options = ModelOptions.ofProvider(reloaded.provider(p.id)!!, reloaded.list())
+        assertEquals(null, options.first { it.id == "A" }.declaredVision)
+        assertTrue(options.first { it.id == "A" }.imageTested)
+        assertFalse(options.first { it.id == "B" }.imageTested)
+        assertEquals(listOf("m1", "m2", "A"), reloaded.provider(p.id)!!.models!!.map { it.id })
+    }
+
     @Test fun modelContextSurvivesPruningAndIsSharedOnlyWithinTheSameProviderAndModel() {
         val s = store()
         val first = connected(s)

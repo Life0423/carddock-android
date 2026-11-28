@@ -20,7 +20,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.life0423.carddock.core.model.PersonalTemplate
 import com.life0423.carddock.core.model.TemplateDefinition
-import com.life0423.carddock.data.SquareEntry
 import com.life0423.carddock.data.SquareState
 import com.life0423.carddock.ui.theme.DockColors
 
@@ -29,10 +28,11 @@ import com.life0423.carddock.ui.theme.DockColors
 internal fun TemplatesScreen(
     personal: List<PersonalTemplate>, square: SquareState,
     enabled: Boolean, onUse: (TemplateDefinition) -> Unit,
-    onEdit: (String?) -> Unit, onDelete: (String) -> Unit,
-    onDownload: (SquareEntry) -> Unit, onUnfavorite: (SquareEntry) -> Unit,
+    onEdit: (String?) -> Unit, onDelete: (String) -> Unit, onDiscard: (String) -> Unit,
+    showDrafts: Boolean, onSection: (Boolean) -> Unit,
 ) {
-    var section by rememberSaveable { mutableIntStateOf(0) }
+    val routes = rememberedRoutes().filter { if (showDrafts) !it.saved else it.isTemplate }
+    val entries = personal.filter { if (showDrafts) it.edit != null else it.published != null }
     var deleting by remember { mutableStateOf<PersonalTemplate?>(null) }
     LazyColumn(
         Modifier.testTag("templates_list"),
@@ -41,9 +41,9 @@ internal fun TemplatesScreen(
     ) {
         item {
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
-                listOf("我的", "已下载", "收藏").forEachIndexed { index, label ->
-                    SegmentedButton(selected = section == index, onClick = { section = index },
-                        shape = SegmentedButtonDefaults.itemShape(index, 3), icon = {},
+                listOf("模板", "草稿").forEachIndexed { index, label ->
+                    SegmentedButton(selected = showDrafts == (index == 1), onClick = { onSection(index == 1) },
+                        shape = SegmentedButtonDefaults.itemShape(index, 2), icon = {},
                         colors = SegmentedButtonDefaults.colors(activeContainerColor = DockColors.Surface,
                             activeContentColor = DockColors.Mint, inactiveContainerColor = DockColors.Raised,
                             inactiveContentColor = DockColors.Muted),
@@ -51,77 +51,57 @@ internal fun TemplatesScreen(
                 }
             }
         }
-        if (section == 1) {
-            if (square.installed.isEmpty()) item { Text("暂无已下载模板", color = DockColors.Muted) }
-            items(square.installed, key = { it.id }) { entry ->
+        items(routes, key = { "route:" + it.id }) { row -> RouteTicket(row, enabled, library = true) }
+        if (!showDrafts) {
+            items(square.installed, key = { "download:" + it.id }) { entry ->
                 val template = entry.definition()
-                TemplateRow(entry.title, "${entry.author} · 第 ${entry.version} 版", template, enabled,
+                TemplateRow(entry.title, "已下载 · ${entry.author} · 第 ${entry.version} 版", template, enabled,
                     "建卡", { onUse(template) }, tag = "use_downloaded_${entry.id}")
             }
         }
-        if (section == 2) {
-            if (square.favorites.isEmpty()) item { Text("暂无收藏模板", color = DockColors.Muted) }
-            square.message?.let { message -> item { Text(message, color = DockColors.Muted) } }
-            items(square.favorites, key = { it.id }) { entry ->
-                TemplateRow(entry.title, "${entry.author} · 第 ${entry.version} 版", entry.definition(),
-                    enabled && !square.busy, "下载", { onDownload(entry) }, tag = "download_favorite_${entry.id}",
-                    extra = { TextButton({ onUnfavorite(entry) }, enabled = !square.busy) { Text("取消收藏") } })
-            }
+        if (entries.isEmpty() && routes.isEmpty() && (showDrafts || square.installed.isEmpty())) item {
+            Text(if (showDrafts) "暂无草稿" else "暂无可用模板", color = DockColors.Muted)
         }
-        if (section == 0 && personal.isEmpty()) item {
-            Text("新建模板后，可从空间添加卡片。", color = DockColors.Muted)
-        }
-        if (section == 0) for ((heading, entries) in listOf(
-            "可用模板" to personal.filter { it.published != null },
-            "草稿" to personal.filter { it.published == null },
-        )) {
-            if (entries.isEmpty()) continue
-            item {
-                Text(heading, Modifier.padding(top = 12.dp).background(DockColors.Ticket,
-                    RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)).padding(horizontal = 14.dp, vertical = 6.dp),
-                    color = DockColors.Text, style = MaterialTheme.typography.titleSmall)
-            }
-            itemsIndexed(entries, key = { _, entry -> entry.id }) { index, entry ->
-                val definition = entry.published
-                val title = definition?.title ?: entry.edit?.let { it.title.ifBlank { it.prompt.orEmpty().take(32) } }.orEmpty()
-                var menu by remember { mutableStateOf(false) }
-                TemplateRow(
-                    title, when {
-                        definition == null -> entry.edit?.prompt.orEmpty().ifBlank { "尚未完成试运行" }
-                        entry.edit != null -> "第 ${definition.revision} 版 · 有编辑草稿"
-                        definition.pickupEntry != null -> "到站可出示取件码"
-                        definition.rule.countRoute != null -> definition.rule.countRoute?.page.orEmpty()
-                        definition.rule.monitorComparison != null -> definition.description
-                        else -> ""
-                    }, definition, enabled,
-                    if (definition == null) "继续编辑" else "建卡",
-                    { if (definition == null) onEdit(entry.id) else onUse(definition) },
-                    tag = "use_template_${entry.id}", first = index == 0, last = index == entries.lastIndex,
-                    extra = {
-                        Box {
-                            IconButton(onClick = { menu = true }, enabled = enabled) {
-                                Icon(DockIcons.MoreHoriz, "$title 的模板操作")
-                            }
-                            DropdownMenu(menu, { menu = false }) {
-                                if (definition != null) DropdownMenuItem(
-                                    text = { Text(if (entry.edit == null) "编辑模板" else "继续编辑") },
-                                    onClick = { menu = false; onEdit(entry.id) },
-                                )
-                                DropdownMenuItem(text = { Text("删除模板") },
-                                    onClick = { menu = false; deleting = entry })
-                            }
+        itemsIndexed(entries, key = { _, entry -> entry.id }) { index, entry ->
+            val definition = entry.published.takeUnless { showDrafts }
+            val title = definition?.title ?: entry.edit?.let { it.title.ifBlank { it.prompt.orEmpty().take(32) } }.orEmpty()
+            var menu by remember { mutableStateOf(false) }
+            TemplateRow(
+                title, when {
+                    definition == null -> entry.edit?.prompt.orEmpty().ifBlank { "尚未完成试运行" }
+                    entry.edit != null -> "第 ${definition.revision} 版 · 有编辑草稿"
+                    definition.pickupEntry != null -> "到站可出示取件码"
+                    definition.rule.countRoute != null -> definition.rule.countRoute?.page.orEmpty()
+                    definition.rule.monitorComparison != null -> definition.description
+                    else -> ""
+                }, definition, enabled,
+                if (definition == null) "继续编辑" else "建卡",
+                { if (definition == null) onEdit(entry.id) else onUse(definition) },
+                tag = "use_template_${entry.id}", first = index == 0, last = index == entries.lastIndex,
+                extra = {
+                    Box {
+                        IconButton(onClick = { menu = true }, enabled = enabled) {
+                            Icon(DockIcons.MoreHoriz, "$title 的模板操作")
                         }
-                    },
-                )
-            }
+                        DropdownMenu(menu, { menu = false }) {
+                            if (definition != null) DropdownMenuItem(
+                                text = { Text(if (entry.edit == null) "编辑模板" else "继续编辑") },
+                                onClick = { menu = false; onEdit(entry.id) },
+                            )
+                            DropdownMenuItem(text = { Text(if (showDrafts) "删除草稿" else "删除模板") },
+                                onClick = { menu = false; deleting = entry })
+                        }
+                    }
+                },
+            )
         }
     }
     deleting?.let { entry ->
         AlertDialog(
             onDismissRequest = { deleting = null },
-            title = { Text("删除模板？") },
-            text = { Text("已从此模板创建的卡片可以继续使用。") },
-            confirmButton = { TextButton(onClick = { onDelete(entry.id); deleting = null }) { Text("删除") } },
+            title = { Text(if (showDrafts) "删除草稿？" else "删除模板？") },
+            text = { Text(if (showDrafts) "将移除这份未保存的编辑内容。" else "已从此模板创建的卡片可以继续使用。") },
+            confirmButton = { TextButton(onClick = { if (showDrafts) onDiscard(entry.id) else onDelete(entry.id); deleting = null }) { Text("删除") } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("取消") } },
         )
     }
@@ -135,6 +115,8 @@ internal fun CardTemplatePicker(
     onDismiss: () -> Unit, onUse: (TemplateDefinition) -> Unit, onCreate: () -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val routes = rememberedRoutes().filter { it.isTemplate && it.demand().contains(query.trim(), ignoreCase = true) }
     val matches = ready.filter { it.title.contains(query.trim(), ignoreCase = true) }
     val downloads = downloaded.filter { it.title.contains(query.trim(), ignoreCase = true) }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = DockColors.Background) {
@@ -148,13 +130,19 @@ internal fun CardTemplatePicker(
                     shape = RoundedCornerShape(14.dp)) {
                     Text("去创建新模板")
                 }
-                if (ready.isNotEmpty() || downloaded.isNotEmpty()) OutlinedTextField(
+                OutlinedTextField(
                     query, { query = it }, label = { Text("搜索模板") },
                     singleLine = true, modifier = Modifier.fillMaxWidth(),
                 )
             }
-            if (matches.isEmpty() && downloads.isEmpty()) item {
-                Text(if (ready.isEmpty() && downloaded.isEmpty()) "暂无可用模板" else "没有匹配的模板")
+            if (matches.isEmpty() && downloads.isEmpty() && routes.isEmpty()) item {
+                Text(if (query.isBlank()) "暂无可用模板" else "没有匹配的模板")
+            }
+            items(routes, key = { "route:" + it.id }) { row ->
+                TemplateRow(row.demand(), row.scope, null, true, "选择", {
+                    onDismiss()
+                    context.openRoutes(id = row.id)
+                }, tag = "pick_route_${row.id}")
             }
             if (matches.isNotEmpty()) item { Text("我的模板", style = MaterialTheme.typography.titleMedium) }
             items(matches, key = { it.id }) { template ->

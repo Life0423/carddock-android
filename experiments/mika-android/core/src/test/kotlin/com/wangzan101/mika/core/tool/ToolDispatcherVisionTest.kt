@@ -11,6 +11,7 @@ import com.wangzan101.mika.core.vision.uiEl
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -60,6 +61,24 @@ class ToolDispatcherVisionTest {
         assertEquals("invalid_arguments", bad.s("error"))
         val none = dispatcher(LocScreen(), "null").execute(call("phone_find_visually", """{"target":"某个图标"}""")).content
         assertEquals("true", none.s("ok")); assertEquals("false", none.s("found")); assertEquals("not_found", none.s("reason"))
+    }
+
+    @Test fun pixelRequestKeepsTheLabelForCorroborationAndConfirmsTheCrop() = runTest {
+        val model = com.wangzan101.mika.core.agent.FakeModel(
+            *listOf("""{"bbox_2d":[480,150,950,850],"seen":"WLAN","visible_text":"WLAN"}""", "是").map {
+                com.wangzan101.mika.core.model.ModelReply(listOf(Part.Text(it)), com.wangzan101.mika.core.model.StopReason.EndTurn, null)
+            }.toTypedArray(), groundingVerified = false)
+        val button = wlan.copy(bounds = listOf(831, 205, 955, 255), centerX = 1126, centerY = 645)
+        val label = button.copy(ref = "@e2", role = "TextView", bounds = listOf(831, 205, 907, 255), centerX = 1096, clickable = false)
+        val screen = LocScreen(listOf(button, label)).apply { width = 1260; height = 2800 }
+        val d = toolDispatcher(screen, vision = VisionService(model, JvmTestImageOps))
+        val hit = d.execute(call("phone_find_visually", """{"target":"WLAN 图标","text":"WLAN","requirePixels":true}""")).content
+        assertEquals(hit.toString(), JsonPrimitive("vision"), hit["source"])
+        assertFalse(hit["unverified"] == JsonPrimitive(true))
+        assertTrue(hit.s("x").toInt() in 831..955 && hit.s("y").toInt() in 205..255)
+        assertEquals(2, model.requests.size)
+        assertEquals(2, model.requests.first().flatMap { it.parts }.count { it is Part.Image })
+        assertEquals(2, model.requests.last().flatMap { it.parts }.count { it is Part.Image })
     }
 
     @Test fun tapVRefWorksWhenScreenSame() = runTest {

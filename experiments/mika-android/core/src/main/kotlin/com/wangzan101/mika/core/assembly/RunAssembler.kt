@@ -1,6 +1,8 @@
 package com.wangzan101.mika.core.assembly
 
 import com.wangzan101.mika.core.capability.Capability
+import com.wangzan101.mika.core.tool.AgentTool
+import com.wangzan101.mika.core.tool.ToolIndex
 import com.wangzan101.mika.core.agent.CoreSections
 import com.wangzan101.mika.core.general.GeneralGroup
 import com.wangzan101.mika.core.run.RunSpec
@@ -36,8 +38,22 @@ internal class RunAssembler(private val providers: List<CapabilityProvider>) {
             .filter { !readOnly || it.risk == Risk.Read }
         val capabilityTools = capabilities.flatMap { it.tools() }.filter { !readOnly || it.risk == Risk.Read ||
             it.capability == "web" && it.verb == Verb.Navigate }
-        return ToolDispatcher(capabilities, general + capabilityTools,
+        // 路线验证会重复执行，只开放可记录的导航和读屏；不暴露脚本、系统写入或委派入口。
+        val offered = if (spec.browseRoute) general.filter { it.allowedForBrowse() } + capabilityTools.filter { it.allowedForBrowse() }
+        else general + capabilityTools
+        return ToolDispatcher(capabilities, offered,
             listOf(CoreSections) + capabilities, config, { ctx -> Interfaces.attach(ctx, capabilities.mapNotNull { it.surface }, stableRefs) },
             formerPrefix, renamed, retired, moved)
     }
+}
+
+/** 自由任务转换为浏览模板时，复用与实时工具发现相同的可浏览操作集合。 */
+internal fun AgentTool.allowedForBrowse(): Boolean = if (capability == null)
+    verb in setOf(Verb.AskUser, Verb.Wait, Verb.EndNotDone, Verb.KnowledgeRead, Verb.KnowledgeSearch)
+else risk == Risk.Read || routable && verb in setOf(Verb.LaunchApp, Verb.Tap, Verb.TypeText, Verb.ClearText, Verb.Scroll, Verb.Swipe, Verb.Back)
+
+/** 手机浏览模板只接受本机手机工具与通用只读辅助。批中每个工具另外出现在动作和工具回执中。 */
+fun ToolIndex.allowsPhoneBrowse(name: String): Boolean {
+    val tool = this[name] as? AgentTool ?: return false
+    return (tool.capability == null || tool.capability == "phone") && tool.allowedForBrowse()
 }

@@ -24,6 +24,14 @@ class RouteMatcherTest {
     private val memo = Route("m", "在备忘录里写{1}", 1, listOf("com.notes"), emptyMap(), emptyList(), lastUsedMs = 0)
     private val goal = "在备忘录里写今天天气不错"
 
+    @Test fun pinnedCardKeepsItsOwnRouteEvenAfterExperienceIsReplaced() = runTest {
+        val model = FakeModel()
+        val pinned = RouteChoice(memo, listOf("今天天气不错"))
+        val store = MemRoutes(memo.copy(id = "another"))
+        assertEquals(pinned, RouteMatcher(model, store, null, pinned).choose(goal))
+        assertTrue(model.requests.isEmpty())
+    }
+
     @Test fun noCandidatesNoModelCall() = runTest {
         val m = FakeModel()
         assertNull(RouteMatcher(m, MemRoutes(memo), null).choose("打开计算器算一下"))

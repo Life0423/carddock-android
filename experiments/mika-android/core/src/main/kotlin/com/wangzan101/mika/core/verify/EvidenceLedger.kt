@@ -86,7 +86,8 @@ class EvidenceLedger(private val capChars: Int = STORE_CHARS) {
     /** 交给核对的条目:见类说明。每条已去掉输入框回显;去掉后没字的不选。 */
     fun forAnswer(goal: String, answer: String): List<Observation> {
         val cands = entries.mapNotNull(::withoutEcho)
-        val holds = cands.indices.filter { i -> Grounding.check(goal, answer, listOf(cands[i].text)).let { it.claims.size > it.unmatched.size } }
+        val holds = cands.indices.filter { i -> cands[i].replayEntrySource != null ||
+            Grounding.check(goal, answer, listOf(cands[i].text)).let { it.claims.size > it.unmatched.size } }
         val said = (goal + "\n" + answer).lowercase()
         val places = holds.mapNotNull { cands[it].where } + cands.mapNotNull { it.where }.filter { w -> placeNames(w).any { it in said } }
         val latest = places.distinct().map { w -> cands.indexOfLast { it.where == w } }

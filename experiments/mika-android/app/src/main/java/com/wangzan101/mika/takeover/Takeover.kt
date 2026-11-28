@@ -111,6 +111,9 @@ class Takeover(
     /** 最近一次挪动失败的原因,下一次成功后清空。 */
     val problem: StateFlow<Problem?> = _problem.asStateFlow()
 
+    /** 前台一次只能交接一个应用，等待队首交还后才能接管下一项。 */
+    val firstInQueue: Boolean get() = queue?.isFirst(this) != false
+
     /** App 在用户手上(主屏):这时它不在虚拟屏上是有意的,不算「被用户拿走」。 */
     val handedOver: Boolean get() = _stage.value == Stage.HandedOver
 

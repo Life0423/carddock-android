@@ -206,7 +206,10 @@ fun RolePickerContent(ui: ModelSetupUi, role: ModelRole, actions: RolePickerActi
         if (fixed.isNotEmpty()) {
             GroupCard {
                 fixed.forEachIndexed { i, choice ->
-                    RadioRow(
+                    if (role == ModelRole.Vision && choice == RoleChoice.SameAsMain) {
+                        ListRow(null, stringResource(R.string.vision_pin_main), subtitle = stringResource(R.string.vision_pin_main_note),
+                            first = i == 0, onClick = { actions.choose(choice) })
+                    } else RadioRow(
                         ModelsCopy.choiceTitle(choice), selected = ui.roles[role] == choice, onClick = { actions.choose(choice) },
                         subtitle = ModelsCopy.choiceNote(role, choice), first = i == 0,
                     )

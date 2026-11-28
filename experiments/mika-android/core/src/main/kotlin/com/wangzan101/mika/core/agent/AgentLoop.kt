@@ -58,6 +58,7 @@ import com.wangzan101.mika.core.tool.ToolDispatcher
 import com.wangzan101.mika.core.tool.ToolExecution
 import com.wangzan101.mika.core.tool.Verb
 import com.wangzan101.mika.core.replay.RouteMatcher
+import com.wangzan101.mika.core.uistate.interfaces
 import com.wangzan101.mika.core.verify.Verifier
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlinx.coroutines.CancellationException
@@ -168,6 +169,9 @@ class AgentLoop(
     /** 同一网站、App 里连着做对外动作(发送、提交)时两次之间的间隔;默认不等。 */
     private val outwardPacing: OutwardPacing = OutwardPacing.Off,
     private val trace: RunTrace? = null,
+    /** 回放命中或首次探索已出现目标时，交给宿主从当前屏核实。 */
+    private val routeAnswer: ((com.wangzan101.mika.core.uistate.ScreenSnapshot?, Boolean) -> String?)? = null,
+    private val browseNavigation: (suspend (String) -> List<String>)? = null,
 ) {
     init {
         require(maxSteps > 0) { "maxSteps must be positive" }
@@ -227,11 +231,12 @@ class AgentLoop(
     private var earlierGoals: List<String> = emptyList()
     /** 本次运行的结局;判过结局后路线计数要用([noteOutcome])。 */
     @Volatile private var lastEnd: TaskState? = null
-    private val review = AnswerReview(tools, verifier, ::emit, ::now)
+    private val review = AnswerReview(tools, verifier, ::emit, ::now, pinnedCard = routeMatcher?.pinned != null)
     /** 本任务每一步存下的画面编号(步 → 编号),回答的来源按它附上画面。 */
     private val media = mutableMapOf<Int, MutableList<Int>>()
     /** 本任务的回答已因核对没对上退回过一次;再没对上就标成未确认交出,不再退回。 */
     private var gapsNudged = false
+    private var summaryNudged = false
     private var provenance = RunProvenance()
     val activeAsk: Delivery.Ask? get() = user.activeAsk
 
@@ -373,7 +378,13 @@ class AgentLoop(
         tools.preload(task, priorTurns.lastOrNull()?.groups.orEmpty()).forEach { emit(RunEvent.State(now(), "tools_preloaded", it)) }
         var openGroups = tools.expanded
         val batchSpec = BatchRunner.spec(tools.batchable()).takeIf { flags.batchSteps }
+        // 固定路线到站后只允许读屏和回答，不能用临场导航补齐一条没有复现的路线。
+        val currentScreenReads = setOf(Verb.Observe, Verb.ListElements, Verb.Screenshot, Verb.PhoneFind, Verb.Query, Verb.Describe)
+        fun readableAfterReplay(name: String) = tools.verb(name) == Verb.EndNotDone ||
+            (tools.surfaceOf(name) == tools.surface && tools.verb(name) in currentScreenReads &&
+                tools.declaredRisk(name) == com.wangzan101.mika.core.tool.Risk.Read)
         fun keep(s: ToolSpec): Boolean {
+            if (routeMatcher?.pinned != null && !readableAfterReplay(s.name)) return false
             val verb = tools.verb(s.name)
             return (confirmations != null || verb != Verb.RequestConfirmation) && (memory != null || verb !in MEMORY_VERBS)
         }
@@ -396,6 +407,8 @@ class AgentLoop(
         val executor = ActionExecutor(tools, guards, confirmations, gate = ::awaitGate, recorder = recorder, offScreen = tools.offScreenGuard(), approvals = approvals,
             provenance = provenance,
             selfPackage = selfPackage, autonomous = autonomous, pacing = outwardPacing)
+        var unresolvedStep: Int? = null
+        var alternateRouteOffered = false
         var emptyNudged = false
         // 调过工具才有可核对的材料;交给用户付款和放行过对外动作一样,回答要另请核查
         var acted = false
@@ -410,6 +423,7 @@ class AgentLoop(
         fun facts() = ReviewFacts(acted, paymentHandedOver || recorder.outwardActs > 0, recorder.lastChangeMark?.let { !tools.readSince(it) } == true)
         media.clear()
         gapsNudged = false
+        summaryNudged = false
         interruptedStep = 0
         var note = ""
         // 除用户原话以外的上下文都经它生成:统一外壳、统一预算
@@ -478,17 +492,39 @@ class AgentLoop(
         }
         // 第一次模型调用之前:有合适的路线就先照着做,不调模型;做完或对不上都交还模型
         // 路线只记、只放手机上的做法:点名用网页的任务不回放
-        if (flags.replay && replay != null && !task.trimStart().startsWith(WEB_CHANNEL_PREFIX)) {
-            val reviewRoute = provenance.origin == RunOrigin.Ui && intentGate != null && routeMatcher?.candidates(task)?.isNotEmpty() == true
+        if (flags.replay && replay != null && (routeMatcher?.pinned != null || !task.trimStart().startsWith(WEB_CHANNEL_PREFIX))) {
+            val reviewRoute = routeMatcher?.pinned == null && provenance.origin == RunOrigin.Ui && intentGate != null && routeMatcher?.candidates(task)?.isNotEmpty() == true
             if (reviewRoute) intent = assessIntent()
             if (!reviewRoute || intent == IntentGate.Intent.Read || intent == IntentGate.Intent.Act) {
-                replay.run(task, history, executor, ctx, track)?.let { place = it; acted = true }
+                val observed = replay.run(task, history, executor, ctx, track) { page -> routeAnswer?.invoke(page, false) != null }
+                if (routeMatcher?.pinned != null && (!replay.completed || observed == null))
+                    return TaskState.Failed(replay.failureDetail, FailKind.Guard)
+                observed?.let { place = it; acted = true }
+                if (routeMatcher?.pinned != null && replay.completed && observed != null)
+                    routeAnswer?.invoke(tools.interfaces.session.lastSnapshot, true)?.let { return TaskState.Succeeded(it) }
             }
         }
 
+        var refusedAfterReplay = false
+        var reviewedIncomplete = false
+        val hintedApps = mutableSetOf<String>()
         for (step in 1..maxSteps) {
+            // 单步和批量启动都会更新 place；在进入该应用后的下一次模型调用前交付线索。
+            val pkg = place?.takeIf { it.kind == PlaceKind.App }?.name
+            if (browseNavigation != null && pkg != null && hintedApps.add(pkg)) {
+                val entrances = browseNavigation.invoke(pkg)
+                if (entrances.isNotEmpty()) {
+                    emit(RunEvent.State(now(), "navigation_history", pkg + " · " + entrances.joinToString("、")))
+                    history += ctx.notice("以往同类查询的导航标签",
+                    "应用重启后可能停在上次选择的子页签。若缺少入口，先看顶部和底部导航，回到显示入口的首页，再从当前截图寻找：" + entrances.joinToString("、") +
+                        "。无文字图块的名称和位置是历史线索，只有在当前截图确认标题后，才按当前图块编号操作。结果页已显示所问对象、周期和筛选范围时直接读取并回答。")
+                }
+            }
             appendSteers(history, inbox)
             if (maxSteps != Int.MAX_VALUE) TurnPolicy.beforeStep(TurnSnapshot(step, maxSteps))?.let { history += ctx.notice(it.source, it.text) }
+            if (step > 1 && routeMatcher?.pinned == null) {
+                routeAnswer?.invoke(tools.interfaces.session.lastSnapshot, false)?.let { return TaskState.Succeeded(it) }
+            }
             appendRuntimeState(history, place, labels, step)
             _state.value = TaskState.Running(step, note, progress = progressState())
             refreshOffer()
@@ -588,7 +624,7 @@ class AgentLoop(
                     val mismatch = ReplyLanguage.mismatch(latestWords, text)
                     if (mismatch != null) {
                         languageNudged = true
-                        TurnPolicy.language(mismatch).let { history += ctx.notice(it.source, it.text) }
+                        TurnPolicy.language(mismatch, pinnedCard = routeMatcher?.pinned != null).let { history += ctx.notice(it.source, it.text) }
                         continue
                     }
                 }
@@ -608,6 +644,27 @@ class AgentLoop(
             answered = null
 
             val first = calls.first()
+            val args = parseArgs(first.argsJson)
+            if (routeMatcher?.pinned != null && replay?.completed == true && !reviewedIncomplete &&
+                tools.verb(first.name) == Verb.EndNotDone &&
+                ((args["subtype"] as? JsonPrimitive)?.contentOrNull ?: "interaction_failed") == "interaction_failed") {
+                // 已有终点证据时复核一次未完成原因。第二次仍报告缺口就照常结束。
+                reviewedIncomplete = true
+                recordReply(Redactor.args(Verb.EndNotDone, first.argsJson, secretField = true))
+                emit(RunEvent.State(now(), "scope_recheck", "已到达终点，重新核对未完成原因"))
+                history += Message(Role.Tool, calls.map { Part.ToolResult(it.id, """{"ok":false,"error":"review_verified_endpoint","executed":false}""", isError = true) }, Author.Mika)
+                history += ctx.notice("复核本次查询口径", "请把当前页面证据与本轮确认的口径逐项核对。若所需字段齐全，以普通答复交付，交由正常流程核验。仍缺必要字段或来源不符时，再报告未完成并指明具体缺口。")
+                continue
+            }
+            if (routeMatcher?.pinned != null && !readableAfterReplay(first.name)) {
+                recordReply(Redactor.args(tools.verb(first.name), first.argsJson, secretField = true))
+                if (refusedAfterReplay) return TaskState.Failed("已到达路线终点，但还需其他操作才能取得结果。请重新试查。", FailKind.Guard)
+                refusedAfterReplay = true
+                // 终点已有本次读屏。拒绝额外动作后给一次按现场证据回答的机会，结果仍须通过核对。
+                history += Message(Role.Tool, calls.map { Part.ToolResult(it.id, """{"ok":false,"error":"pinned_read_only","executed":false}""", isError = true) }, Author.Mika)
+                history += ctx.notice("核对本次结果", "导航已结束，刚才的额外操作没有执行。请按本次终点读屏直接回答用户的问题并写明当前范围；如证据不足，可重读当前屏或说明缺失。")
+                continue
+            }
             trace?.toolStarted(step, first.name, first.id, now())
             val skipped = calls.drop(1).map {
                 Part.ToolResult(it.id, buildJsonObject {
@@ -616,7 +673,6 @@ class AgentLoop(
                     put("message", Feedback["parallel_call_skipped"])
                 }.toString(), isError = true)
             }
-            val args = parseArgs(first.argsJson)
 
             // 用户刚同意的那一步要单独做:批里的步不带同意,混进去会被关卡拦下,同意也可能被别的步用掉或作废
             if (((flags.batchSteps && first.name == DO_STEPS_TOOL) || tools.composite(first.name)) && confirmations?.hasGrant == true) {
@@ -697,6 +753,43 @@ class AgentLoop(
                         recordReply(Redactor.args(tools.verb(first.name), first.argsJson, secretField = true))
                         return StopRules.guard(it)
                     }
+                    if (action.code == Refusals.TARGET_UNRESOLVED) {
+                        val where = place?.name?.let { "（$it）" }.orEmpty()
+                        val previous = unresolvedStep
+                        if (alternateRouteOffered) return TaskState.Failed(
+                            "第 ${previous} 步未能定位目标。重新读屏后，第 ${step} 步$where 仍无法确认可安全操作的控件，本次点击未执行。", FailKind.Guard)
+                        if (previous == null) unresolvedStep = step else alternateRouteOffered = true
+                        // 走同一执行入口读取目标所在的屏幕，仅把新画面交还模型，不重放被拒的点击。
+                        val dump = tools.index.nameOf(Verb.Observe, tools.surfaceOf(first.name))
+                            ?: return TaskState.Failed("第 ${step} 步$where 无法识别目标，当前界面不支持重新读屏。", FailKind.Guard)
+                        val read = Part.ToolCall("target_recovery_$step", dump, "{}")
+                        val refreshed = executor.run(read, Origin.Model(step))
+                        if (refreshed is ActionOutcome.Cancelled) return TaskState.Cancelled
+                        guards.stop?.let { return StopRules.guard(it) }
+                        if (refreshed !is ActionOutcome.Ran || refreshed.content["ok"] != JsonPrimitive(true))
+                            return TaskState.Failed("第 ${step} 步$where 无法识别目标，重新读取界面失败。", FailKind.Guard)
+                        refreshed.exec.place?.let { place = it }
+                        history += Message(Role.Assistant, listOf(read), Author.Mika)
+                        history += Message(Role.Tool, listOf(Part.ToolResult(read.id, refreshed.content.toString(), false,
+                            refreshed.exec.observations.map { it.tag })), Author.Mika)
+                        val observation = refreshed.exec
+                        // 自适应观察有时只给元素树；定位无名控件时把同次观察留下的画面一并交还。
+                        val frame = observation.image ?: observation.frame?.takeIf { model.capabilities.vision }
+                        if (frame != null) history += Message(Role.User, listOf(Part.Text(NoticePolicy.imageNote(Verb.Observe, false)),
+                            tools.modelImage(frame, (observation.content["screenshotId"] as? JsonPrimitive)?.content?.toIntOrNull())), Author.Mika)
+                        if (refreshed.picture != null && refreshed.shotId != null) {
+                            record { sink.media(refreshed.shotId, refreshed.picture) }
+                            media.getOrPut(step) { mutableListOf() } += refreshed.shotId
+                            emit(RunEvent.Media(now(), refreshed.shotId, step, RunEvent.placeLabel(place)))
+                        }
+                        val guidance = if (alternateRouteOffered)
+                            "这个入口已经受阻。不要再点它或旁边无名图标。换一条有文字的只读路线，例如栏目、搜索或上一级页面；核对本次页面的范围后再回答。"
+                        else (if (frame != null) "请对照附图和控件树。" else "本次未附图。") +
+                            "无名称时先用可用的 find_visually 从实时截图定位导航图标或文字，再用返回的新编号操作。看不清时换一个有文字的入口。"
+                        history += ctx.notice("卡坞只读探索", guidance)
+                        track.after(verb, ok = false, guard = false, changed = null, recovery = true, app = null)
+                        continue
+                    }
                     // 应用权限拒绝已经由执行入口作为工具结果交给模型:不结束任务,让模型换路线或向用户说明
                     if (AppAccessDenied.isAppAccessCode(action.code)) {
                         track.after(tools.verb(first.name), ok = false, guard = false, changed = null, recovery = false, app = null)
@@ -711,6 +804,10 @@ class AgentLoop(
                 is ActionOutcome.Ran -> action
             }
             val exec = ran.exec
+            if (exec.changed == true && ran.content["ok"] == JsonPrimitive(true)) {
+                unresolvedStep = null
+                alternateRouteOffered = false
+            }
             val noNewData = newData.after(verb, exec)
             if (noNewData) emit(RunEvent.State(now(), "no_new_data", NewDataTracker.LIMIT.toString()))
             if (verb == Verb.HandToUser && (args["reason"] as? JsonPrimitive)?.contentOrNull == PAYMENT) paymentHandedOver = true
@@ -910,8 +1007,10 @@ class AgentLoop(
         val isError = exec.content["ok"] != JsonPrimitive(true)
         history += Message(Role.Tool, listOf(Part.ToolResult(first.id, exec.content.toString(), isError, exec.observations.map { it.tag })) + skipped, Author.Mika)
         // 批做完(或停下)后再给模型一份当前元素表；只有元素信息不足才附画面。
+        var currentPlace = exec.place
         if (steps != null && ranAnyStep(exec.content)) {
             tools.lookNow()?.let { v ->
+                com.wangzan101.mika.core.tool.placeOf(v.content)?.let { currentPlace = it }
                 history += Message(Role.User, listOfNotNull(Part.Text(batchViewNote(v.content.toString())), v.image?.let { tools.modelImage(it, v.imageId) }), Author.Mika)
             }
         }
@@ -921,7 +1020,6 @@ class AgentLoop(
         // 子步之后按条件等界面的时间另记,小结里算等待
         emit(RunEvent.ToolResult(now(), step, first.name, RunEvent.clipResult(Redactor.text(exec.content.toString())), exec.changed, shotId, durationMs,
             waitMs = runner?.waitedMs ?: 0, callId = first.id))
-        val currentPlace = exec.place
         currentPlace?.let(app)
         // 要确认不算失败(和单步被拦一样不进失败熔断),但同样交给主模型
         // 为新插话停下的批同样不算失败
@@ -958,7 +1056,14 @@ class AgentLoop(
      * 核对没对上:能退回([history] 不为 null,而且本任务还没退回过)就提醒模型一次、返回 null 接着做;
      * 否则照样交出,没对上的几处标成未确认。[facts] 是核对要看的任务情况(见 [ReviewFacts])。
      */
-    private suspend fun conclude(task: String, answer: String, step: Int, facts: ReviewFacts, history: MutableList<Message>?): TaskState? {
+    private suspend fun conclude(task: String, proposed: String, step: Int, facts: ReviewFacts, history: MutableList<Message>?): TaskState? {
+        val screen = tools.interfaces.session.lastSnapshot
+        val counts = if (facts.acted && !facts.outward) com.wangzan101.mika.core.verify.ListQuantityCheck.check(proposed, screen) else null
+        val answer = counts?.answer ?: proposed
+        if (counts != null) {
+            screen?.packageName?.let { tools.noteReplayRead(it, counts.evidence) }
+            emit(RunEvent.State(now(), "list_count_check", "checked=${counts.checked} corrected=${counts.corrected}"))
+        }
         if (!reviewFinalAnswer) {
             val sources = review.sourcesOnly(task, answer, media)
             if (sources.isNotEmpty()) emit(RunEvent.Sources(now(), sources))
@@ -971,7 +1076,19 @@ class AgentLoop(
         val missing = r.unconfirmed
         if (missing.isNotEmpty() && history != null && !gapsNudged) {
             gapsNudged = true
-            TurnPolicy.unconfirmed(r.gaps, r.objections).let { history += ctx.notice(it.source, it.text) }
+            val notice = TurnPolicy.unconfirmed(r.gaps, r.objections, pinnedCard = routeMatcher?.pinned != null || approvals.browseRoute, goal = task)
+            history += ctx.notice(notice.source, notice.text)
+            return null
+        }
+        // 卡片解释实际范围时可能再次引用原问题中的词。只允许重写摘要，仍走同一套事实和任务核对。
+        val canSummarize = routeMatcher?.pinned == null || replay?.completed == true && r.gaps.all { it in task }
+        if (approvals.browseRoute && canSummarize && history != null && !summaryNudged &&
+            r.gaps.isNotEmpty() && r.objections.isEmpty() && r.sources.isNotEmpty()) {
+            summaryNudged = true
+            history += ctx.notice("试查结果证据核对", "请立即根据这次读到的证据，用最简短的列表回答：实际范围、当前对象、实际数值。"
+                + "删掉复述用户问题、列举没有看到的选项以及推测替代范围的整句。无需提供模板规则。"
+                + "以下词句没有从页面核实，不要再次引用或主张它们：" + r.gaps.joinToString("、")
+                + "。只在已读范围内下结论；用户确认口径中的必要字段若未读到，请逐项说明缺口。")
             return null
         }
         if (missing.isNotEmpty()) emit(RunEvent.Unconfirmed(now(), step, missing.map(::detail)))
@@ -991,6 +1108,9 @@ class AgentLoop(
         TurnPolicy.closeout(closeout, completion?.metric?.state()).let { history += ctx.notice(it.source, it.text) }
         repeat(3) { attempt ->
             appendSteers(history, inbox)
+            if (step > 1 && routeMatcher?.pinned == null) {
+                routeAnswer?.invoke(tools.interfaces.session.lastSnapshot, false)?.let { return TaskState.Succeeded(it) }
+            }
             appendRuntimeState(history, place, labels, step)
             _state.value = TaskState.Running(step, "")
             val asked = now()

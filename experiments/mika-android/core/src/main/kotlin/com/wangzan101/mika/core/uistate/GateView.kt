@@ -55,6 +55,7 @@ internal class GateView {
             (info?.target ?: (args["target"] as? JsonPrimitive)?.content)?.let { put("target", it) }
             info?.text?.let { put("text", it) }
             info?.seen?.let { put("seen", it) }
+            if (info != null && !info.unverified) put("verifiedVisualRef", true)
         }
     }
 
@@ -108,6 +109,9 @@ internal class GateView {
             verb == Verb.TypeText || verb == Verb.ClearText -> s?.elements?.firstOrNull { it.focused && it.editable }
             else -> null
         }
-        return Capture(el?.let { RouteAnchors.selector(s!!, it) }, RouteAnchors.before(s, el), s)
+        val selector = el?.let { RouteAnchors.selector(s!!, it) }
+        val visual = locatedRef(verb, o)?.first?.let(session.locatedInfo::get)
+        return Capture(if (selector != null && verb == Verb.Tap && visual != null && !visual.unverified)
+            selector.copy(visualDescription = visual.target) else selector, RouteAnchors.before(s, el), s)
     }
 }

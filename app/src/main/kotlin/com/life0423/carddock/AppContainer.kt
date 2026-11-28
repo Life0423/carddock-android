@@ -253,6 +253,8 @@ class AppContainer(private val context: Context) {
     // 不阻塞构造。读成功才发布磁盘或种子；读失败则结束 loading，集合为空且不可写。
     init {
         applicationScope.launch { controller.initialize() }
+        // 冷启动可能由通知或其他页面触发，先从本机回执收尾上次未落盘的路线状态。
+        applicationScope.launch(Dispatchers.IO) { com.wangzan101.mika.task.DockRoutes(context).reconcileBusy() }
         applicationScope.launch {
             controller.state.map { if (it.loading || !it.cardsReadable) null else it.cards.mapNotNull { c ->
                 c.rule.localReminder?.let { schedule -> c.id to schedule }
@@ -265,6 +267,7 @@ class AppContainer(private val context: Context) {
         }
         applicationScope.launch {
             try {
+                modelSettings.migrateToMika()
                 val model = modelSettings.load()?.let { ModelSummary(it.endpoint, it.model) }
                 mutableTools.value = mutableTools.value.copy(model = model)
             } catch (cancelled: CancellationException) {

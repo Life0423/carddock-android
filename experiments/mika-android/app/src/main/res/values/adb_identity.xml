@@ -1,0 +1,5 @@
+<resources>
+    <!-- 集成宿主可沿用自身已有的配对密钥别名。 -->
+    <string name="adb_key_wrap_alias" translatable="false">mika_adb_key_wrap</string>
+    <string name="adb_connection_prefs" translatable="false">builtin_shell</string>
+</resources>

@@ -57,17 +57,25 @@ internal fun SpaceScreen(
     onToggleShoppingFavorite: () -> Unit, onOpenShopping: (() -> Unit)?, onAdd: () -> Unit, onOpenRank: () -> Unit,
 ) {
     val context = LocalContext.current
+    var deletingCard by remember { mutableStateOf<CardRecord?>(null) }
     var picker by remember { mutableStateOf(false) }
     var launchIssue by remember { mutableStateOf("") }
     fun openApp(key: String) { launchIssue = context.launchSavedApp(key).orEmpty() }
     if (picker) AppPicker({ picker = false }, onTask = { demand ->
         picker = false
-        actions.openTemplateEditor(null)
-        actions.changePrompt(demand)
-        actions.prepareTemplate()
+        context.openFreeTask(demand)
     }) { picker = false; openApp(it.key) }
     if (launchIssue.isNotBlank()) AlertDialog(onDismissRequest = { launchIssue = "" }, text = { Text(launchIssue) },
         confirmButton = { TextButton({ launchIssue = "" }) { Text("关闭") } })
+    // 空间只展示已从模板创建的实例；未完成的试查保存在模板库草稿中。
+    val routeRows = rememberedRoutes().filter { it.isCard }.sortedByDescending { it.busy }
+    deletingCard?.let { card ->
+        val active = card.run?.phase?.isBusy() == true
+        AlertDialog({ deletingCard = null }, title = { Text(if (active) "停止并删除卡片？" else "删除卡片？") },
+            text = { Text("将移除「${card.title}」及其结果，模板仍可使用。") },
+            confirmButton = { TextButton({ actions.deleteCard(card.id); deletingCard = null }) { Text(if (active) "停止并删除" else "删除") } },
+            dismissButton = { TextButton({ deletingCard = null }) { Text("取消") } })
+    }
     val nativeIds = cards.filterNot { it.rule.sourceId.startsWith("demo.") }.map { it.id }
     val ordered: List<CardRecord?> = cards.sortedByDescending { it.favorite }.toMutableList<CardRecord?>().apply {
         if (onOpenShopping != null) add(if (shoppingFavorite) cards.count { it.favorite } else size, null)
@@ -78,9 +86,16 @@ internal fun SpaceScreen(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        item { TextButton({ picker = true }, enabled = sequence == null) { Text("打开手机上的应用") } }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button({ context.openRoutes() }, enabled = sequence == null, shape = DockButtonShape) { Text("新建卡片") }
+                TextButton({ context.openFreeTask() }, enabled = sequence == null, shape = DockButtonShape) { Text("自由操作") }
+                TextButton({ picker = true }, enabled = sequence == null) { Text("打开应用") }
+            }
+        }
+        items(routeRows, key = { "route:" + it.id }) { row -> RouteTicket(row, sequence == null) }
         if (sequence != null) item { SequenceControls(sequence, actions, nativeIds) }
-        if (cards.isEmpty() && onOpenShopping == null) item {
+        if (cards.isEmpty() && routeRows.isEmpty() && onOpenShopping == null) item {
             Surface(color = DockColors.Surface, shape = RoundedCornerShape(16.dp)) {
                 Column(
                     Modifier.fillMaxWidth().padding(20.dp),
@@ -120,8 +135,10 @@ internal fun SpaceScreen(
                 confirmButton = { TextButton(onClick = { choosePrimary = false }) { Text("关闭") } },
             )
             Surface(
-                onClick = { if (card.rule.officialAction == OfficialAction.OPEN_APP) openApp(card.rule.targetKey) else actions.refreshCard(card.id) },
-                enabled = !phase.isBusy() && sequence == null,
+                onClick = { if (!phase.isBusy()) {
+                    if (card.rule.officialAction == OfficialAction.OPEN_APP) openApp(card.rule.targetKey) else actions.refreshCard(card.id)
+                } },
+                enabled = sequence == null,
                 modifier = Modifier.fillMaxWidth().testTag("refresh_${card.id}"),
                 color = face?.let { ticketPaper(it.role) } ?: DockColors.Surface,
                 shape = RoundedCornerShape(16.dp),
@@ -146,6 +163,8 @@ internal fun SpaceScreen(
                                     onClick = { cardMenu = false; choosePrimary = true })
                                 DropdownMenuItem(text = { Text("查看详情") }, modifier = Modifier.testTag("open_card_${card.id}"),
                                     onClick = { cardMenu = false; onOpenCard(card.id) })
+                                DropdownMenuItem(text = { Text(if (phase.isBusy()) "停止并删除卡片" else "删除卡片") },
+                                    enabled = sequence == null, onClick = { cardMenu = false; deletingCard = card })
                             }
                         }
                     }

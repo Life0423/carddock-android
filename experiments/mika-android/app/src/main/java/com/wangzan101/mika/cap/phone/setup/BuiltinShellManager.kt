@@ -168,7 +168,7 @@ class BuiltinShellManager(context: Context, private val hub: HelperHub, private 
         /** 用户填的端口,下一次连接取走。 */
         val manualPort = AtomicReference<Int?>(null)
         private val scan = LocalPortScan(NioPortScanner(), ::localHosts, { LocalPortScan.parseRange(portRangeText()) })
-        private val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        private val prefs = app.getSharedPreferences(app.getString(com.wangzan101.mika.R.string.adb_connection_prefs), Context.MODE_PRIVATE)
         private val finder = NsdAdbServiceFinder(app)
         private val portCache = object : PortCache {
             override fun load() = prefs.getInt("port", 0).takeIf { it > 0 }
@@ -308,7 +308,6 @@ class BuiltinShellManager(context: Context, private val hub: HelperHub, private 
     companion object {
         /** 内置助手从安卓 12 起启用;旧系统使用不带较新屏幕标志的兼容路径。 */
         const val MIN_SDK = Build.VERSION_CODES.S
-        private const val PREFS = "builtin_shell"
         /** 和配对其余几处(PairingCoordinator、PairingCodeReader)用同一个,按它一条命令就能看完配对经过。 */
         private const val PAIRING_TAG = "MikaPairing"
         /** 安卓原版 adbd 把无线调试的连接端口写在这个系统属性里;读不到时靠缓存、mDNS、扫本机端口和用户填的端口。 */

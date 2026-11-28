@@ -113,6 +113,12 @@ class PrototypeController(
         deleteTemplate = { id -> scope.launch {
             if (!library.update { list -> list.filterNot { it.id == id } }) notify("模板删除失败，请重试。")
         } },
+        discardTemplateDraft = { id -> scope.launch {
+            // 已发布模板的编辑草稿可单独丢弃；只有草稿的条目才整体移除。
+            if (!library.update { list -> list.mapNotNull { entry ->
+                if (entry.id != id) entry else entry.takeIf { it.published != null }?.copy(edit = null)
+            } }) notify("草稿删除失败，请重试。")
+        } },
         changeRouteOid = creator::changeRouteOid,
         changeOrderNumber = creator::changeOrderNumber,
         demonstrateField = { creator.trial(demonstration = it) },

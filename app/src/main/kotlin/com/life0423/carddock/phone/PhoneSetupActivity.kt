@@ -106,6 +106,10 @@ class PhoneSetupActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (intent.getBooleanExtra("embeddedAssistant", false)) {
+            setContent { MikaPhoneSettings(::finish) }
+            return
+        }
         val container = (application as CardDockApplication).container
         // 通知只负责限时配对。返回设置页或在分屏中配对成功后，由前台接续连接。
         lifecycleScope.launch {

@@ -47,17 +47,24 @@ internal object TurnPolicy {
     /**
      * 回答核对没对上,退回一次时的提醒:[gaps] 是读到的材料里找不到的那几处,[objections] 是核查模型判没做成的理由,分开说。
      */
-    fun unconfirmed(gaps: List<String>, objections: List<String> = emptyList()): Notice {
+    fun unconfirmed(gaps: List<String>, objections: List<String> = emptyList(), pinnedCard: Boolean = false, goal: String = ""): Notice {
         val findings = listOfNotNull(
             gaps.takeIf { it.isNotEmpty() }?.let { Feedback.format("unconfirmed_gaps", "items" to it.joinToString("\n") { g -> "- $g" }) },
             objections.takeIf { it.isNotEmpty() }?.let { Feedback.format("unconfirmed_objection", "reasons" to it.joinToString("\n") { o -> "- $o" }) },
         ).joinToString("\n")
-        return Notice(Feedback["unconfirmed_source"], Feedback.format("unconfirmed_nudge", "findings" to findings))
+        val prompt = when {
+            pinnedCard && objections.isEmpty() && gaps.isNotEmpty() && gaps.all { it in goal } -> "pinned_goal_wording"
+            pinnedCard -> "pinned_answer_correction"
+            else -> "unconfirmed_nudge"
+        }
+        return Notice(Feedback["unconfirmed_source"], Feedback.format(prompt, "findings" to findings))
     }
 
     /** 回答的正文不是用户那句的语言([m] 是两边的语族,见 [ReplyLanguage]):退回一次,整段改写成用户的语言。 */
-    fun language(m: ReplyLanguage.Mismatch): Notice =
-        Notice(Feedback["language_source"], Feedback.format("language_nudge", "answer" to m.answer.display, "user" to m.user.display))
+    fun language(m: ReplyLanguage.Mismatch, pinnedCard: Boolean = false): Notice {
+        val prompt = if (pinnedCard) "pinned_language_nudge" else "language_nudge"
+        return Notice(Feedback["language_source"], Feedback.format(prompt, "answer" to m.answer.display, "user" to m.user.display))
+    }
 
     /** 回复正文里漏出了对 [tool] 的调用(见 [LeakedToolCall]):退回一次,经工具接口重新调用,或用文字回答。 */
     fun leakedToolCall(tool: String): Notice =

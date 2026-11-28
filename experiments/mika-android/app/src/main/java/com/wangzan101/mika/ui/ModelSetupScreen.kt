@@ -1,5 +1,8 @@
 package com.wangzan101.mika.ui
 
+import kotlinx.coroutines.launch
+import com.wangzan101.mika.settings.VisionSelection
+import com.wangzan101.mika.settings.verifyAndActivateVision
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -102,6 +105,7 @@ fun ModelSetupScreen(
     onOpenSpeech: (() -> Unit)? = null,
     /** 设置里查看 Token 用量;上手流程不传。 */
     onOpenUsage: (() -> Unit)? = null,
+    initialRole: ModelRole? = null,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -117,7 +121,7 @@ fun ModelSetupScreen(
         )
     }
     val ui by vm.state.collectAsState()
-    var picking by rememberSaveable { mutableStateOf<ModelRole?>(null) }
+    var picking by rememberSaveable { mutableStateOf(initialRole) }
     var openProvider by rememberSaveable { mutableStateOf<String?>(null) }
     var allModels by rememberSaveable { mutableStateOf(false) }
     // 账号登录的面板:在添加表单和服务商详情里都能打开,登录中关掉也不打断登录
@@ -139,6 +143,14 @@ fun ModelSetupScreen(
 
     val provider = openProvider?.let { id -> ui.providers.firstOrNull { it.id == id } }
     val role = picking
+    var visionSelection by remember { mutableStateOf<VisionSelection?>(null) }
+    visionSelection?.let { target ->
+        VisionTestDialog(store, target, onClose = { visionSelection = null }, onUsed = {
+            visionSelection = null
+            picking = null
+            Toast.makeText(context, R.string.vision_probe_ok, Toast.LENGTH_SHORT).show()
+        })
+    }
     when {
         provider != null -> {
             LaunchedEffect(provider.id) { vm.ensureListed() }
@@ -150,7 +162,10 @@ fun ModelSetupScreen(
             val actions = ProviderDetailActions(
                 refresh = { vm.refresh(provider.id) }, changeKey = { vm.changeKey(provider.id, it) },
                 remove = { vm.removeProvider(provider.id); openProvider = null; allModels = false },
-                use = { r, model -> vm.pick(r, provider.id, model) },
+                use = { r, model ->
+                    if (r == ModelRole.Vision) visionSelection = VisionSelection(provider.id, model)
+                    else vm.pick(r, provider.id, model)
+                },
                 setVision = { model, sees -> vm.setModelVision(provider.id, model, sees) },
                 showAll = { allModels = true },
                 retest = { vm.retest(provider.id) },
@@ -176,17 +191,32 @@ fun ModelSetupScreen(
         }
         role != null -> {
             BackHandler { picking = null }
-            LaunchedEffect(role) { vm.ensureListed(); vm.clearManualPick() }
+            LaunchedEffect(role) {
+                vm.ensureListed()
+                if (role == ModelRole.Vision) ui.providers.filter { it.savedUntested && it.models?.isEmpty() == true }
+                    .forEach { vm.refresh(it.id) }
+                vm.clearManualPick()
+            }
             RolePickerContent(
                 ui, role,
                 RolePickerActions(
                     pick = { pid, model ->
                         // 刚存下、没有一个模型试通过的那家:先试调用,通了才选上、返回
-                        if (ui.probeBeforePick(role, pid)) vm.pickManual(role, pid, model) { picking = null }
+                        if (role == ModelRole.Vision) visionSelection = VisionSelection(pid, model)
+                        else if (ui.probeBeforePick(role, pid)) vm.pickManual(role, pid, model) { picking = null }
                         else { vm.pick(role, pid, model); picking = null }
                     },
-                    pickManual = { pid, model -> vm.pickManual(role, pid, model) { picking = null } },
-                    choose = { vm.choose(role, it); picking = null },
+                    pickManual = { pid, model ->
+                        if (role == ModelRole.Vision) visionSelection = VisionSelection(pid, model)
+                        else vm.pickManual(role, pid, model) { picking = null }
+                    },
+                    choose = { choice ->
+                        if (role == ModelRole.Vision && choice == RoleChoice.SameAsMain) {
+                            val main = store.configFor(ModelRole.Main)
+                            if (main == null) Toast.makeText(context, R.string.vision_probe_need_main, Toast.LENGTH_SHORT).show()
+                            else visionSelection = VisionSelection(main.providerId, main.model)
+                        } else { vm.choose(role, choice); picking = null }
+                    },
                     addProvider = { vm.openForm(); picking = null },
                 ),
                 onBack = { picking = null },
@@ -704,7 +734,12 @@ object ModelSetupCopy {
         val visionKnown = o.visionKnown || o.visionByUser != null
         if (o.typed) add(tr(R.string.cap_typed) to false)
         if (forVision) {
-            add((if (visionKnown) tr(R.string.cap_vision) else tr(R.string.cap_vision_unconfirmed)) to false)
+            add(tr(when (o.declaredVision) {
+                true -> R.string.vision_declared_yes
+                false -> R.string.vision_declared_no
+                null -> R.string.vision_undeclared
+            }) to false)
+            if (o.imageTested) add(tr(R.string.vision_probe_passed) to true)
         } else {
             when {
                 !caps.toolCalls -> add(tr(R.string.cap_no_tools) to false)
@@ -716,4 +751,32 @@ object ModelSetupCopy {
         if (caps.reasoning) add(tr(R.string.cap_reasoning) to false)
         if (o.contextKnown) add(ModelOptions.contextLabel(caps.contextTokens) to false)
     }
+}
+
+/** 明示发送的测试内容；关闭弹窗时取消它持有的网络协程。 */
+@Composable
+private fun VisionTestDialog(store: ProviderStore, target: VisionSelection, onClose: () -> Unit, onUsed: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf(0) }
+    MikaDialog(onDismissRequest = onClose, title = { Text(stringResource(R.string.vision_probe_title)) },
+        text = {
+            Text(when {
+                busy -> stringResource(R.string.vision_probe_busy)
+                error != 0 -> stringResource(error)
+                else -> stringResource(R.string.vision_probe_prompt, target.model)
+            })
+        },
+        confirmButton = {
+            TextButton(enabled = !busy, onClick = {
+                busy = true
+                scope.launch {
+                    error = store.verifyAndActivateVision(target)
+                    busy = false
+                    if (error == 0) onUsed()
+                }
+            }) { Text(stringResource(R.string.vision_probe_run)) }
+        },
+        dismissButton = { TextButton(onClose) { Text(stringResource(R.string.cancel)) } },
+    )
 }

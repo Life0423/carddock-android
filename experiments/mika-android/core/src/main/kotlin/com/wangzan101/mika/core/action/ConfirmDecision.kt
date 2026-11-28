@@ -62,7 +62,7 @@ class ConfirmDecision(
     /** 判定放在锁屏等待之后:按此刻重新读的一屏判。 */
     suspend fun judge(tool: String, args: JsonObject, origin: Origin): Decision {
         outwardSite = null
-        if (autonomous || approvals.autonomous()) {
+        if (!approvals.browseRoute && (autonomous || approvals.autonomous())) {
             val target = tools.gateTarget(tool)
             if (IrreversibleDetector.needsCheck(target, args)) {
                 val aim = tools.interfaces.actionTarget(tools.declared(tool), args)
@@ -90,11 +90,59 @@ class ConfirmDecision(
         // 复看确认过的所见文字(@vN 才有):读屏里没有文字时(自绘界面)付款的同意按它核对象
         val seen = aim.seen
         val hit = IrreversibleDetector.classify(target, checked, snap, fresh)
+        var verifiedNavigationWithoutNode = false
+        if (approvals.browseRoute && verb == Verb.Tap) {
+            // @e 编号属于发给模型的快照；peek 返回端口自己的编号，不能在两棵树里按同一个 ref 查。
+            val controls = if (origin == Origin.Replay && checked["ref"] != null) {
+                val recorded = snap?.let { ClassifiedRisk.target(verb, checked, it) } ?: return Decision.Unresolved
+                if (fresh == null || fresh.packageName != snap.packageName || fresh.protected ||
+                    !fresh.hasWindow || fresh.changedDuringRead || fresh.captureError != null) return Decision.Unresolved
+                val current = fresh.elements.singleOrNull { it.role == recorded.role &&
+                    it.resourceId == recorded.resourceId && it.name == recorded.name && it.bounds == recorded.bounds &&
+                    it.clickable == recorded.clickable && it.editable == recorded.editable && it.secret == recorded.secret
+                } ?: return Decision.Unresolved
+                if (current.ref != recorded.ref) recorder?.let {
+                    it.event(com.wangzan101.mika.core.record.RunEvent.State(it.now(), "replay_control_rebound",
+                        "同一控件已在本次两份快照按名称、角色、位置核实，编号已变。"))
+                }
+                listOf(recorded, current)
+            } else listOfNotNull(snap, fresh).mapNotNull { ClassifiedRisk.target(verb, checked, it) }
+            if ((controls.map { it.name } + seen.orEmpty()).any(com.wangzan101.mika.core.replay.RouteAnchors::requiresUserConsent))
+                return Decision.Unresolved
+            val change = Regex("增加数量|减少数量|移出购物车|移出餐袋|清空购物|清空餐袋|加一份|减一份|add.?to.?(cart|bag)|remove.?from.?(cart|bag)|increment|decrement|quantity.(add|minus)|cart.(add|plus|minus)", RegexOption.IGNORE_CASE)
+            // 只有视觉工具登记的当前点能用这条例外；重新命中同一控件后核对导航文字或资源名。
+            val identified = (args["ref"] as? JsonPrimitive)?.content?.startsWith("@v") == true && checked["ref"] == null && checked["verifiedVisualRef"] == JsonPrimitive(true) &&
+                snap != null && fresh != null && snap.packageName == fresh.packageName && controls.size == 2 &&
+                controls.first().bounds == controls.last().bounds && controls.first().resourceId == controls.last().resourceId
+            val navigation = Regex("筛选|类型筛选|过滤|排序|搜索|分类|排行|趋势|filter|sort|search|ranking|trend", RegexOption.IGNORE_CASE)
+            // 只读固定路线的像素回退：画面确认的原文须与导航目标一致，仍经下面的风险和审批检查。
+            val visible = seen.orEmpty().trim()
+            verifiedNavigationWithoutNode = origin == Origin.Replay && controls.isEmpty() && hit == null &&
+                (args["ref"] as? JsonPrimitive)?.content?.startsWith("@v") == true && checked["verifiedVisualRef"] == JsonPrimitive(true) &&
+                snap != null && fresh != null && snap.packageName != null && snap.packageName == fresh.packageName &&
+                listOf(snap, fresh).all { it.hasWindow && !it.protected && !it.changedDuringRead && it.captureError == null } &&
+                navigation.matches(visible) && (checked["target"] as? JsonPrimitive)?.content?.contains(visible, ignoreCase = true) == true
+            if ((controls.isEmpty() && !verifiedNavigationWithoutNode) || controls.any { element ->
+                    val name = element.name.trim()
+                    val visualNav = identified && (navigation.matches(seen.orEmpty().trim()) ||
+                        navigation.matches(element.resourceId.orEmpty().substringAfterLast('/')))
+                    (name.isEmpty() && !visualNav) || name in setOf("+", "＋", "-", "−", "－") || change.containsMatchIn(name + " " + element.resourceId.orEmpty())
+                }) return Decision.Unresolved
+        }
+        if (approvals.manualShopping) {
+            // 通用 Agent 只能查商品；明确的加购按钮交给宿主的单份确认流程。
+            val addCart = listOfNotNull(snap, fresh).any { screen ->
+                val label = ClassifiedRisk.target(verb, checked, screen)?.name.orEmpty()
+                listOf("加入购物车", "加入購物車", "加购", "加購", "加入餐袋", "加入购物袋", "add to cart", "add to bag")
+                    .any { label.contains(it, ignoreCase = true) }
+            }
+            if (addCart) return Decision.Denied(Irreversible(IrrevAction.order, "加入购物车"))
+        }
         val risk = risks.assess(verb, hit) { fresh ?: snap }
         outwardSite = outward(hit, fresh ?: snap)
         approve(tool, checked, origin, hit, risk, fresh ?: snap, typing, seen)?.let { return it }
-        if (hit != null || !IrreversibleDetector.unresolved(target, checked, snap, fresh)) return Decision.Clear
-        return if (policy.refuseUnresolved) Decision.Unresolved else Decision.Traced(unresolvedDetail(args, aim.readAgeMs, fresh != null))
+        if (hit != null || verifiedNavigationWithoutNode || !IrreversibleDetector.unresolved(target, checked, snap, fresh)) return Decision.Clear
+        return if (policy.refuseUnresolved || approvals.browseRoute) Decision.Unresolved else Decision.Traced(unresolvedDetail(args, aim.readAgeMs, fresh != null))
     }
 
     /** 命中的是发送、提交时这一屏的网站或 App。 */
@@ -122,6 +170,8 @@ class ConfirmDecision(
         fun audit(decision: String) {
             if (decision != "allowed" || risk.level.outward || risk.payment) recorder?.approval(origin, tool, asked, risk, decision)
         }
+        if (approvals.browseRoute && (hit != null || risk.level.outward || risk.payment)) return Decision.Denied(asked).also { audit("denied") }
+        if (approvals.manualShopping && risk.payment) return Decision.Denied(asked).also { audit("denied") }
         when (ApprovalPolicy.decide(risk, provenance)) {
             Approval.Allow -> return null.also { audit("allowed") }
             Approval.Deny -> return Decision.Denied(asked).also { audit("denied") }

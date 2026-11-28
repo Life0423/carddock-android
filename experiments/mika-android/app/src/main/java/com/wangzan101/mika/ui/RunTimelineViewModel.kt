@@ -52,6 +52,8 @@ data class TimelineStep(
     val screenshotId: Int?,
     val activities: List<TimelineActivity> = emptyList(),
     val timing: StepTiming = StepTiming(),
+    /** 前后包名相同表示在应用内变页；保留结构化变化，不带控件正文。 */
+    val pageChanges: List<Pair<String?, String>> = emptyList(),
 )
 
 data class TimelineHeader(
@@ -172,6 +174,15 @@ class RunTimelineViewModel(
                         row.activities.dropLast(1) + last.copy(count = last.count + 1, obsIds = (last.obsIds + e.obsIds).distinct())
                     } else row.activities + next
                     rows[e.step] = row.copy(activities = activities)
+                }
+                is RunEvent.ActionTarget -> {
+                    val before = e.before.packageName
+                    val after = e.after.packageName ?: continue
+                    if (e.effective && !e.protected && !e.incomplete && (before != after ||
+                        (e.before.texts.isNotEmpty() && e.after.texts.isNotEmpty() && e.before.texts.toSet() != e.after.texts.toSet()))) {
+                        val row = at(e.step)
+                        rows[e.step] = row.copy(pageChanges = (row.pageChanges + (before to after)).distinct())
+                    }
                 }
                 is RunEvent.Verifier -> tag(verifierTag(e.verdict))
                 is RunEvent.Confirmation -> tag(

@@ -14,11 +14,12 @@ require(squareEndpoint == null || URI(squareEndpoint).run {
 
 android {
     namespace = "com.life0423.carddock"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.life0423.carddock"
-        minSdk = 26
+        minSdk = 30
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         targetSdk = 35
         versionCode = providers.gradleProperty("carddockVersionCode").orNull?.toInt() ?: 1
         versionName = providers.gradleProperty("carddockVersionName").orNull ?: "0.1.0-prototype"
@@ -42,7 +43,7 @@ android {
         create("beta") {
             initWith(getByName("release"))
             signingConfig = signingConfigs.findByName("internalBeta")
-            versionNameSuffix = "-beta.21"
+            versionNameSuffix = "-beta.37"
             resValue("string", "app_name", "卡坞内测")
             matchingFallbacks += "release"
         }
@@ -56,11 +57,15 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    packaging { jniLibs { useLegacyPackaging = true } }
+    androidResources { noCompress += "xz" }
+
     buildFeatures {
         compose = true
         aidl = true
     }
 
+    testBuildType = providers.gradleProperty("carddockTestBuildType").orElse("debug").get()
     testOptions {
         unitTests.isIncludeAndroidResources = true
     }
@@ -73,7 +78,7 @@ kotlin {
 dependencies {
     implementation(project(":core"))
     implementation("com.google.zxing:core:3.5.3")
-    implementation(project(":phone-pairing"))
+    implementation("com.wangzan101.mika:embedded:0.1.38")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
@@ -88,6 +93,9 @@ dependencies {
     testImplementation(testFixtures(project(":core")))
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.robolectric)
